@@ -1,12 +1,12 @@
 #!/bin/bash
-# Vision-Based PDF QA System Startup Script for Linux/macOS
-# Handles Ollama setup and application launch
+# PDF Q&A System with OpenAI gpt-oss-20b - Startup Script
+# Updated for gpt-oss-20b model
 
 set -e
 
 echo "========================================================================"
-echo "   VISION-BASED PDF QA SYSTEM"
-echo "   Powered by Llama 3.2-Vision + ColPali"
+echo "   PDF Q&A SYSTEM WITH GPT-OSS-20B"
+echo "   Powered by OpenAI's gpt-oss-20b (21B params, Apache 2.0)"
 echo "========================================================================"
 echo
 
@@ -23,117 +23,147 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check if Ollama is installed
-if ! command -v ollama &> /dev/null; then
-    echo -e "${RED}ERROR: Ollama is not installed${NC}"
-    echo
-    echo "Please install Ollama:"
-    echo "  macOS: brew install ollama"
-    echo "  Linux: curl -fsSL https://ollama.ai/install.sh | sh"
-    echo "  Or visit: https://ollama.ai/download"
-    exit 1
-fi
-
-echo "[1/6] Checking Ollama installation..."
-ollama --version
+echo "[1/7] Checking Python installation..."
+python3 --version
 echo
 
 # Check if virtual environment exists
 if [ ! -d "venv" ]; then
-    echo "[2/6] Creating virtual environment..."
+    echo "[2/7] Creating virtual environment..."
     python3 -m venv venv
     echo -e "${GREEN}Virtual environment created successfully${NC}"
 else
-    echo "[2/6] Virtual environment already exists"
+    echo "[2/7] Virtual environment already exists"
 fi
 echo
 
 # Activate virtual environment
-echo "[3/6] Activating virtual environment..."
+echo "[3/7] Activating virtual environment..."
 source venv/bin/activate
 echo
 
 # Check if dependencies are installed
-echo "[4/6] Checking dependencies..."
+echo "[4/7] Checking dependencies..."
 
-# Quick check for PyMuPDF only (fastest check)
-if ! python -c "import fitz" 2>/dev/null; then
-    echo "PyMuPDF not found. Installing all dependencies..."
+# Quick check for key packages
+if ! python -c "import flask" 2>/dev/null || ! python -c "import fitz" 2>/dev/null; then
+    echo "Installing dependencies (this may take a few minutes)..."
     pip install --upgrade pip --quiet
 
-    # Install dependencies one by one to avoid hanging
-    echo "Installing core packages..."
-    pip install Flask Werkzeug requests --quiet
+    # Check if CUDA is available
+    if command -v nvidia-smi &> /dev/null; then
+        echo "NVIDIA GPU detected. Installing llama-cpp-python with CUDA support..."
+        CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir --quiet
+    else
+        echo "No NVIDIA GPU detected. Installing CPU-only version..."
+        pip install llama-cpp-python --quiet
+    fi
 
-    echo "Installing PDF processing..."
-    pip install PyMuPDF Pillow --quiet
-
-    echo "Installing AI libraries (this may take a few minutes)..."
-    pip install chromadb transformers sentence-transformers --quiet
-
+    # Install remaining dependencies
     echo "Installing remaining packages..."
-    pip install torch faiss-cpu numpy tqdm ollama --quiet
+    pip install -r requirements.txt --quiet
 
     echo -e "${GREEN}Dependencies installed successfully${NC}"
 else
-    echo "PyMuPDF found. Verifying other dependencies..."
-    # Install any missing dependencies without checking (faster)
-    pip install -r requirements_vision.txt --quiet 2>/dev/null || true
-    echo "Dependencies verified"
+    echo "Dependencies already installed"
 fi
 echo
 
-# Start Ollama if not running
-echo "[5/6] Starting Ollama server..."
-if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
-    echo "Ollama not running, starting Ollama..."
-
-    # Try systemd first (Linux)
-    if command -v systemctl &> /dev/null; then
-        sudo systemctl start ollama || ollama serve &
-    else
-        # macOS or systems without systemd
-        ollama serve &
-    fi
-
-    sleep 5
-    echo -e "${GREEN}Ollama server started${NC}"
+# Check if Ollama is installed (optional, for easy model download)
+echo "[5/7] Checking for Ollama (optional)..."
+if command -v ollama &> /dev/null; then
+    echo "Ollama found: $(ollama --version)"
+    OLLAMA_AVAILABLE=true
 else
-    echo "Ollama server already running"
+    echo "Ollama not found (optional - can download model manually)"
+    OLLAMA_AVAILABLE=false
 fi
 echo
 
-# Check if Llama 3.2-Vision model is installed
-echo "[6/6] Checking Llama 3.2-Vision model..."
-if ! ollama list | grep -q "llama3.2-vision"; then
-    echo
-    echo "========================================================================"
-    echo -e "${YELLOW}WARNING: Llama 3.2-Vision model not found${NC}"
-    echo "========================================================================"
-    echo
-    echo "The vision model needs to be downloaded (~7GB)"
-    echo "This is a one-time download and will take several minutes."
-    echo
-    read -p "Download llama3.2-vision:11b now? (y/n): " download
+# Check if model exists
+echo "[6/7] Checking for gpt-oss-20b model..."
+MODEL_PATH=$(python -c "from model_config import get_model_path; print(get_model_path())" 2>/dev/null || echo "models/gpt-oss-20b.gguf")
 
-    if [[ "$download" == "y" || "$download" == "Y" ]]; then
+if [ ! -f "$MODEL_PATH" ]; then
+    echo
+    echo "========================================================================"
+    echo -e "${YELLOW}WARNING: gpt-oss-20b model not found${NC}"
+    echo "========================================================================"
+    echo
+    echo "Model path: $MODEL_PATH"
+    echo
+
+    if [ "$OLLAMA_AVAILABLE" = true ]; then
+        echo "You can download the model using Ollama (easiest method):"
         echo
-        echo "Downloading Llama 3.2-Vision 11B model..."
-        echo "This may take 5-15 minutes depending on your internet speed."
-        echo
-        ollama pull llama3.2-vision:11b
-        echo
-        echo -e "${GREEN}Model downloaded successfully!${NC}"
-        echo
+        read -p "Download gpt-oss:20b via Ollama now? (y/n): " download
+
+        if [[ "$download" == "y" || "$download" == "Y" ]]; then
+            echo
+            echo "Downloading gpt-oss-20b model..."
+            echo "This may take 5-10 minutes depending on your internet speed."
+            echo
+            ollama pull gpt-oss:20b
+
+            if [ $? -eq 0 ]; then
+                echo
+                echo -e "${GREEN}Model downloaded successfully!${NC}"
+                echo
+
+                # Create symlink
+                OLLAMA_BLOB=$(ls -t ~/.ollama/models/blobs/sha256-* 2>/dev/null | head -1)
+                if [ -n "$OLLAMA_BLOB" ]; then
+                    mkdir -p models
+                    ln -sf "$OLLAMA_BLOB" models/gpt-oss-20b.gguf
+                    echo "Created symlink: models/gpt-oss-20b.gguf -> $OLLAMA_BLOB"
+                fi
+            else
+                echo
+                echo -e "${RED}Failed to download model${NC}"
+                echo "Please see INSTALL_GPT_OSS.md for manual installation"
+                exit 1
+            fi
+        else
+            echo
+            echo "Skipping model download."
+            echo
+            echo "To download the model, you can:"
+            echo "  1. Run: ollama pull gpt-oss:20b"
+            echo "  2. See INSTALL_GPT_OSS.md for other methods"
+            echo
+            echo "Application will fail to start without the model."
+            echo
+            read -p "Continue anyway? (y/n): " continue
+            if [[ "$continue" != "y" && "$continue" != "Y" ]]; then
+                exit 1
+            fi
+        fi
     else
+        echo "Please download the model manually:"
         echo
-        echo "Skipping model download."
-        echo "Note: The application will not work without the vision model."
-        echo "To download later, run: ollama pull llama3.2-vision:11b"
+        echo "Option 1: Install Ollama and download model"
+        echo "  curl -fsSL https://ollama.com/install.sh | sh"
+        echo "  ollama pull gpt-oss:20b"
         echo
+        echo "Option 2: Download from HuggingFace"
+        echo "  huggingface-cli download openai/gpt-oss-20b --include 'original/*' --local-dir models/gpt-oss-20b/"
+        echo
+        echo "See INSTALL_GPT_OSS.md for detailed instructions"
+        echo
+        exit 1
     fi
 else
-    echo "Llama 3.2-Vision model found"
+    echo -e "${GREEN}Model found: $MODEL_PATH${NC}"
+fi
+echo
+
+# Verify model configuration
+echo "[7/7] Verifying model configuration..."
+if python model_config.py 2>/dev/null; then
+    echo -e "${GREEN}Configuration verified${NC}"
+else
+    echo -e "${YELLOW}Warning: Could not verify configuration${NC}"
+    echo "Application may fail to start"
 fi
 echo
 
@@ -142,13 +172,16 @@ echo "   STARTING APPLICATION"
 echo "========================================================================"
 echo
 echo "Server will start at: http://localhost:5000"
+echo "Analytics dashboard: http://localhost:5000/view-log"
+echo "Health check: http://localhost:5000/health"
+echo
 echo "Press Ctrl+C to stop the server"
 echo
 echo "========================================================================"
 echo
 
 # Start the application
-python app_vision.py
+python app_pdf_qa.py
 
 # Cleanup on exit
 trap "echo 'Shutting down...'; deactivate; exit" INT TERM
