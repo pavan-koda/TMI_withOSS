@@ -1,0 +1,123 @@
+# PDF Q&A System with 20B LLM (CPU+GPU Offload)
+# Updated for llama-cpp-python backend with GGUF model support
+
+# Core Flask and Web
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# PDF Processing
+PyMuPDF==1.23.8  # Best for PDF text extraction and image handling
+pypdf==3.17.4  # Backup PDF library
+Pillow==10.1.0  # Image processing
+
+# ============================================================================
+# LLM INFERENCE - llama.cpp Python Bindings
+# ============================================================================
+
+# Install with CUDA support for GPU offloading:
+# CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+#
+# Or for CPU-only (slower):
+# pip install llama-cpp-python
+#
+# For pre-built wheels (recommended):
+llama-cpp-python==0.2.27  # Latest stable version with GGUF support
+
+# Alternative: Install with CUDA from source:
+# CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.27 --force-reinstall --upgrade --no-cache-dir
+
+# ============================================================================
+# VECTOR SEARCH & EMBEDDINGS
+# ============================================================================
+
+# ChromaDB for document search
+chromadb==0.4.22
+hnswlib==0.8.0  # Fast vector search
+pydantic==2.5.3  # Data validation
+
+# Embeddings
+sentence-transformers==2.2.2  # For semantic search
+transformers==4.36.2  # Transformers library
+torch==2.1.2  # PyTorch (CPU version)
+torchvision==0.16.2
+
+# For GPU-accelerated embeddings (optional):
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Alternative vector stores
+faiss-cpu==1.7.4  # For CPU - for GPU use: faiss-gpu
+
+# ============================================================================
+# TEXT PROCESSING & NLP
+# ============================================================================
+
+# Text chunking and processing
+tiktoken==0.5.2  # Token counting for GPT models
+langchain==0.1.0  # Document processing utilities
+langchain-community==0.0.10  # Community extensions
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+numpy==1.26.2  # Numerical operations
+scipy==1.11.4  # Scientific computing
+tqdm==4.66.1  # Progress bars
+python-dotenv==1.0.0  # Environment variables
+requests==2.31.0  # HTTP client
+
+# ============================================================================
+# ANALYTICS & MONITORING
+# ============================================================================
+
+# Logging
+python-json-logger==2.0.7
+colorlog==6.8.0
+
+# Performance monitoring
+psutil==5.9.6  # System resource monitoring
+
+# ============================================================================
+# OPTIONAL: Advanced Features
+# ============================================================================
+
+# ColPali for visual document retrieval (OPTIONAL)
+# Uncomment if you want visual search capabilities:
+# colpali-engine>=0.1.0
+# einops==0.7.0
+# safetensors==0.4.1
+
+# ============================================================================
+# DEVELOPMENT TOOLS (Optional)
+# ============================================================================
+
+# pytest==7.4.3  # Testing
+# black==23.12.1  # Code formatting
+# flake8==7.0.0  # Linting
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+
+# 1. For GPU support (NVIDIA with CUDA):
+#    CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+#
+# 2. For CPU-only (no GPU):
+#    pip install -r requirements.txt
+#
+# 3. Download GGUF model (required):
+#    - Visit: https://huggingface.co/TheBloke
+#    - Download: GPT-20B-Q4_K_M.gguf or similar quantized model
+#    - Place in: models/gpt-20b-q4_k_m.gguf
+#    - Update model_config.py with correct path
+#
+# 4. System Requirements:
+#    - RAM: 16GB+ (model needs ~12GB)
+#    - GPU: NVIDIA with 4GB VRAM (for offloading)
+#    - Storage: 15GB+ (model + dependencies)
+#    - OS: Ubuntu 24 (tested) or similar Linux
+#
+# 5. Expected Performance:
+#    - Response time: 5-15 seconds (with GPU offload)
+#    - Throughput: ~10-30 tokens/second
+#    - Context window: 4096 tokens
