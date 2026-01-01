@@ -1,6 +1,10 @@
-# PDF Q&A System with 20B LLM (CPU+GPU Offload)
+# PDF Q&A System with OpenAI gpt-oss-20b (CPU+GPU Offload)
 
-A powerful PDF question-answering system using a 20B parameter language model with CPU+GPU offloading for efficient inference on systems with limited VRAM.
+A powerful PDF question-answering system using **OpenAI's gpt-oss-20b** (21B parameters, 3.6B active) with CPU+GPU offloading for efficient inference on systems with limited VRAM.
+
+**Model**: OpenAI gpt-oss-20b (Apache 2.0 License)
+**Architecture**: Mixture-of-Experts (MoE) - 21B params, 3.6B active
+**Quantization**: MXFP4 (fits in 16GB RAM)
 
 ---
 
@@ -15,10 +19,12 @@ A powerful PDF question-answering system using a 20B parameter language model wi
 - ✅ **Image Support** - Displays diagrams, charts, and images from PDF
 
 ### AI & Performance
-- ✅ **20B Parameter LLM** - Uses GGUF quantized models for efficient inference
-- ✅ **CPU+GPU Offloading** - Offload layers to GPU (4GB VRAM supported)
+- ✅ **OpenAI gpt-oss-20b** - 21B param MoE model, 3.6B active (Apache 2.0)
+- ✅ **CPU+GPU Offloading** - Offload 15 layers to GPU (4GB VRAM supported)
+- ✅ **MXFP4 Quantization** - Efficient memory usage (~16GB RAM)
 - ✅ **Smart Context** - Retrieves relevant pages using semantic search
 - ✅ **Conversation History** - Remembers last 5 Q&A exchanges for follow-up questions
+- ✅ **Reasoning Levels** - Adjustable reasoning effort (low, medium, high)
 
 ### Analytics & Logging
 - ✅ **Performance Tracking** - Log all questions, answers, response times
@@ -45,15 +51,16 @@ A powerful PDF question-answering system using a 20B parameter language model wi
 
 ## 🚀 Quick Start
 
-### Option 1: Automated Setup (Recommended)
+### Option 1: Automated Setup with Ollama (Recommended)
 
 ```bash
 # Clone or extract project
 cd TMI_withOSS
 
-# Run setup script
+# Run setup script (will install Ollama and gpt-oss-20b)
 chmod +x setup.sh
 ./setup.sh
+# Choose option 1 for Ollama installation
 
 # Activate virtual environment
 source venv/bin/activate
@@ -62,31 +69,38 @@ source venv/bin/activate
 python app_pdf_qa.py
 ```
 
-### Option 2: Manual Setup
+### Option 2: Manual Setup with Ollama
 
 ```bash
-# 1. Create virtual environment
+# 1. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Download gpt-oss-20b model
+ollama pull gpt-oss:20b
+
+# 3. Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 2. Install llama-cpp-python with CUDA support (for GPU)
+# 4. Install llama-cpp-python with CUDA support (for GPU)
 CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python==0.2.27 --force-reinstall --no-cache-dir
 
-# 3. Install other dependencies
+# 5. Install other dependencies
 pip install -r requirements.txt
 
-# 4. Download a GGUF model
-# Visit: https://huggingface.co/TheBloke
-# Download: qwen2.5-14b-instruct.Q4_K_M.gguf (recommended)
-# Place in: models/
+# 6. Find Ollama model location and create symlink
+ls ~/.ollama/models/blobs/sha256-*
+ln -s ~/.ollama/models/blobs/sha256-xxxxx models/gpt-oss-20b.gguf
 
-# 5. Update model path in model_config.py
+# 7. Update model_config.py (or use symlink path)
 nano model_config.py
-# Set: "model_path": "models/qwen2.5-14b-instruct.Q4_K_M.gguf"
+# Set: "model_path": "models/gpt-oss-20b.gguf"
 
-# 6. Start application
+# 8. Start application
 python app_pdf_qa.py
 ```
+
+**Detailed Installation Guide**: See [INSTALL_GPT_OSS.md](INSTALL_GPT_OSS.md)
 
 ### Access the Application
 
@@ -153,15 +167,27 @@ MODEL_CONFIG = {
 }
 ```
 
-**Recommended Models:**
+**Recommended Model: OpenAI gpt-oss-20b** ⭐
 
-| Model | Size | RAM | Quality | Use Case |
-|-------|------|-----|---------|----------|
-| Mistral-7B-Instruct-Q4_K_M | ~4GB | 8GB | Good | Fast, lightweight |
-| Qwen2.5-14B-Instruct-Q4_K_M | ~8GB | 16GB | Excellent | **Recommended** |
-| Mixtral-8x7B-Instruct-Q4_K_M | ~26GB | 32GB | Superior | Best quality |
+| Model | Params | Active | RAM | License | Quality |
+|-------|--------|--------|-----|---------|---------|
+| **gpt-oss-20b** | 21B | 3.6B | 16GB | Apache 2.0 | **Excellent** |
 
-Download from: https://huggingface.co/TheBloke
+**Installation**:
+```bash
+# Easiest method - using Ollama
+ollama pull gpt-oss:20b
+```
+
+**Why gpt-oss-20b?**
+- ✅ Perfect for your hardware (39GB RAM + 4GB VRAM)
+- ✅ Mixture-of-Experts: Only 3.6B active params per token
+- ✅ MXFP4 quantization: Fits in 16GB RAM
+- ✅ Apache 2.0 license: Fully permissive
+- ✅ Built-in reasoning levels and function calling
+
+Download: https://huggingface.co/openai/gpt-oss-20b
+Ollama: https://ollama.com/library/gpt-oss
 
 ---
 
@@ -422,21 +448,39 @@ app.run(host='0.0.0.0', port=5000, debug=False)
 
 ---
 
-## 📚 Model Recommendations
+## 📚 Model: OpenAI gpt-oss-20b
 
-### For Your System (39GB RAM, 4GB VRAM):
+### Perfect for Your System (39GB RAM, 4GB VRAM)
 
-**Best Choice**: Qwen2.5-14B-Instruct-Q4_K_M.gguf
-- Model Size: ~8GB
-- Quality: Excellent for document Q&A
-- Speed: 20-30 tokens/sec with 12 GPU layers
-- Download: https://huggingface.co/TheBloke/Qwen2.5-14B-Instruct-GGUF
+**OpenAI gpt-oss-20b** (Apache 2.0 License)
+- **Parameters**: 21B total, 3.6B active (MoE)
+- **Memory**: ~16GB RAM with MXFP4 quantization
+- **Quality**: Excellent for document Q&A and reasoning
+- **Speed**: 20-30 tokens/sec with 15 GPU layers
+- **License**: Apache 2.0 (fully permissive)
 
-**Alternative**: Mistral-7B-Instruct-v0.2-Q4_K_M.gguf
-- Model Size: ~4GB
-- Quality: Good for general Q&A
-- Speed: 30-40 tokens/sec with 15 GPU layers
-- Download: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+**Key Features**:
+- ✅ Mixture-of-Experts (MoE) architecture
+- ✅ MXFP4 quantization for efficient memory usage
+- ✅ Configurable reasoning levels (low/medium/high)
+- ✅ Full chain-of-thought access
+- ✅ Built-in function calling and tool use
+- ✅ Native web browsing capabilities
+
+**Installation**:
+```bash
+# Using Ollama (easiest)
+ollama pull gpt-oss:20b
+
+# Using HuggingFace
+huggingface-cli download openai/gpt-oss-20b --include "original/*" --local-dir models/gpt-oss-20b/
+```
+
+**Resources**:
+- Model Card: https://huggingface.co/openai/gpt-oss-20b
+- Ollama: https://ollama.com/library/gpt-oss
+- GitHub: https://github.com/openai/gpt-oss
+- Installation Guide: [INSTALL_GPT_OSS.md](INSTALL_GPT_OSS.md)
 
 ---
 

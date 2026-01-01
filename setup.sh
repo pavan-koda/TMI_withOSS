@@ -136,59 +136,115 @@ echo "✓ Directories created"
 echo ""
 echo "Step 8: Model Download"
 echo "-------------------------------------------------------------------------------"
-echo "You need a GGUF model file to run this system."
+echo "This system is configured for OpenAI's gpt-oss-20b model."
 echo ""
-echo "Recommended models:"
-echo "  1. Qwen2.5-14B-Instruct-Q4_K_M.gguf (~8GB)"
-echo "  2. Mistral-7B-Instruct-v0.2-Q4_K_M.gguf (~4GB)"
-echo "  3. Mixtral-8x7B-Instruct-Q4_K_M.gguf (~26GB)"
+echo "Model Info:"
+echo "  - gpt-oss-20b: 21B params, 3.6B active (MoE architecture)"
+echo "  - Memory: ~16GB RAM with MXFP4 quantization"
+echo "  - License: Apache 2.0 (fully permissive)"
+echo "  - Perfect for: 39GB RAM + 4GB VRAM systems"
 echo ""
-echo "Download from: https://huggingface.co/TheBloke"
+echo "Installation options:"
+echo "  1. Ollama (Easiest) - Recommended"
+echo "  2. Direct download from HuggingFace"
+echo "  3. Skip (manual installation later)"
 echo ""
-read -p "Do you want to download a model now? (y/n): " download_model
+read -p "Choose installation method (1-3): " download_model
 
-if [ "$download_model" = "y" ] || [ "$download_model" = "Y" ]; then
-    echo ""
-    echo "Select model to download:"
-    echo "  1. Qwen2.5-14B-Instruct-Q4_K_M (~8GB) - Recommended"
-    echo "  2. Mistral-7B-Instruct-v0.2-Q4_K_M (~4GB) - Smaller, faster"
-    echo "  3. Mixtral-8x7B-Instruct-Q4_K_M (~26GB) - Larger, better quality"
-    read -p "Enter choice (1-3): " model_choice
+case $download_model in
+    1)
+        # Ollama installation
+        echo ""
+        echo "Installing via Ollama..."
+        echo "-------------------------------------------------------------------------------"
 
-    case $model_choice in
-        1)
-            MODEL_URL="https://huggingface.co/TheBloke/Qwen2.5-14B-Instruct-GGUF/resolve/main/qwen2.5-14b-instruct.Q4_K_M.gguf"
-            MODEL_NAME="qwen2.5-14b-instruct.Q4_K_M.gguf"
-            ;;
-        2)
-            MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-            MODEL_NAME="mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-            ;;
-        3)
-            MODEL_URL="https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf"
-            MODEL_NAME="mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf"
-            ;;
-        *)
-            echo "Invalid choice. Skipping download."
-            MODEL_NAME=""
-            ;;
-    esac
-
-    if [ -n "$MODEL_NAME" ]; then
-        echo "Downloading $MODEL_NAME..."
-        wget -O "models/$MODEL_NAME" "$MODEL_URL" || echo "Download failed. Please download manually."
-
-        if [ -f "models/$MODEL_NAME" ]; then
-            echo "✓ Model downloaded to models/$MODEL_NAME"
-            echo ""
-            echo "Updating model_config.py..."
-            sed -i "s|models/gpt-20b-q4_k_m.gguf|models/$MODEL_NAME|g" model_config.py
-            echo "✓ Configuration updated"
+        # Check if Ollama is installed
+        if ! command -v ollama &> /dev/null; then
+            echo "Ollama not found. Installing Ollama..."
+            curl -fsSL https://ollama.com/install.sh | sh
+        else
+            echo "✓ Ollama already installed"
         fi
-    fi
-else
-    echo "⚠ You will need to download a model manually and update model_config.py"
-fi
+
+        # Pull gpt-oss-20b model
+        echo ""
+        echo "Downloading gpt-oss-20b model (this may take 5-10 minutes)..."
+        ollama pull gpt-oss:20b
+
+        if [ $? -eq 0 ]; then
+            echo "✓ Model downloaded successfully"
+
+            # Find model location
+            OLLAMA_MODELS_DIR="$HOME/.ollama/models/blobs"
+            if [ -d "$OLLAMA_MODELS_DIR" ]; then
+                echo ""
+                echo "Model stored in: $OLLAMA_MODELS_DIR"
+
+                # Find the latest blob (model file)
+                LATEST_BLOB=$(ls -t "$OLLAMA_MODELS_DIR"/sha256-* 2>/dev/null | head -1)
+
+                if [ -n "$LATEST_BLOB" ]; then
+                    # Create symlink in models directory
+                    ln -sf "$LATEST_BLOB" models/gpt-oss-20b.gguf
+                    echo "✓ Created symlink: models/gpt-oss-20b.gguf -> $LATEST_BLOB"
+
+                    # Update config
+                    sed -i 's|models/gpt-oss-20b.gguf|models/gpt-oss-20b.gguf|g' model_config.py
+                    echo "✓ Configuration updated"
+                else
+                    echo "⚠ Could not find model file. Please update model_config.py manually."
+                    echo "  Model location: $OLLAMA_MODELS_DIR"
+                fi
+            fi
+        else
+            echo "✗ Failed to download model via Ollama"
+            echo "  Please try manual installation (see INSTALL_GPT_OSS.md)"
+        fi
+        ;;
+
+    2)
+        # Direct HuggingFace download
+        echo ""
+        echo "Downloading from HuggingFace..."
+        echo "-------------------------------------------------------------------------------"
+
+        # Install huggingface-cli if not present
+        pip install -q huggingface-hub
+
+        # Download model
+        echo "Downloading gpt-oss-20b (this may take 10-20 minutes)..."
+        huggingface-cli download openai/gpt-oss-20b \
+            --include "original/*" \
+            --local-dir models/gpt-oss-20b/
+
+        if [ $? -eq 0 ]; then
+            echo "✓ Model downloaded to models/gpt-oss-20b/"
+            echo ""
+            echo "⚠ Note: Model is in PyTorch format"
+            echo "  You may need to convert to GGUF format for llama-cpp-python"
+            echo "  Or use Transformers directly (modify pdf_qa_engine.py)"
+            echo ""
+            echo "  See INSTALL_GPT_OSS.md for conversion instructions"
+        else
+            echo "✗ Failed to download from HuggingFace"
+        fi
+        ;;
+
+    3)
+        # Skip download
+        echo ""
+        echo "⚠ Skipping model download"
+        echo ""
+        echo "To install gpt-oss-20b later, run:"
+        echo "  ollama pull gpt-oss:20b"
+        echo ""
+        echo "Or see INSTALL_GPT_OSS.md for detailed instructions"
+        ;;
+
+    *)
+        echo "Invalid choice. Skipping download."
+        ;;
+esac
 
 # =============================================================================
 # Step 9: Test installation

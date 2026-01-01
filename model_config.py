@@ -12,23 +12,26 @@ from pathlib import Path
 
 MODEL_CONFIG = {
     # Model file path (GGUF format)
-    # Download from: https://huggingface.co/TheBloke
-    # Recommended: GPT-20B-Q4_K_M.gguf or similar quantized model
-    "model_path": os.getenv("MODEL_PATH", "models/gpt-20b-q4_k_m.gguf"),
+    # OpenAI gpt-oss-20b: 21B parameters, 3.6B active (MoE)
+    # Download from: https://huggingface.co/openai/gpt-oss-20b
+    # Or use Ollama: ollama pull gpt-oss:20b
+    "model_path": os.getenv("MODEL_PATH", "models/gpt-oss-20b.gguf"),
 
     # Model type
-    "model_type": "llama",  # Architecture: llama, gpt-neox, etc.
+    "model_type": "gpt-oss",  # OpenAI gpt-oss-20b architecture
 
     # Context window
     "n_ctx": 4096,  # Maximum context length (tokens)
 
     # GPU offloading (CRITICAL for 4GB VRAM)
+    # gpt-oss-20b has 21B params but only 3.6B active (MoE)
+    # Fits in 16GB RAM with MXFP4 quantization
     # Set this based on your GPU memory:
-    # - 0: CPU only (slow but works)
-    # - 10-15: Good balance for 4GB VRAM (recommended)
-    # - 20-25: If you have 6GB VRAM
-    # - 35+: If you have 8GB+ VRAM
-    "n_gpu_layers": int(os.getenv("N_GPU_LAYERS", "12")),  # Offload 12 layers to GPU
+    # - 0: CPU only (model runs in 16GB RAM)
+    # - 10-20: Good balance for 4GB VRAM (recommended: 15)
+    # - 25-30: If you have 6GB VRAM
+    # - 40+: If you have 8GB+ VRAM
+    "n_gpu_layers": int(os.getenv("N_GPU_LAYERS", "15")),  # Offload 15 layers to GPU
 
     # CPU threads
     "n_threads": int(os.getenv("N_THREADS", "8")),  # Use 8 CPU cores
@@ -137,10 +140,11 @@ SYSTEM_REQUIREMENTS = {
     "storage_gb": 45,
     "os": "Ubuntu 24",
 
-    # Estimated memory usage (4-bit quantized 20B model)
-    "model_ram_usage_gb": 12,  # Model loaded in RAM
-    "model_vram_usage_gb": 2,  # 12 layers on GPU (~2GB)
-    "total_ram_needed_gb": 16,  # Model + ChromaDB + Flask
+    # Estimated memory usage (gpt-oss-20b with MXFP4 quantization)
+    # MoE architecture: 21B total params, but only 3.6B active per token
+    "model_ram_usage_gb": 16,  # Model loaded in RAM (MXFP4 quantized)
+    "model_vram_usage_gb": 2.5,  # 15 layers on GPU (~2.5GB)
+    "total_ram_needed_gb": 20,  # Model + ChromaDB + Flask + overhead
 }
 
 # ============================================================================
@@ -165,12 +169,20 @@ def validate_model_exists():
     if not Path(model_path).exists():
         raise FileNotFoundError(
             f"Model file not found: {model_path}\n\n"
-            f"Please download a GGUF model and update model_config.py.\n"
-            f"Recommended models:\n"
-            f"  - GPT-20B-Q4_K_M.gguf (good quality, ~12GB)\n"
-            f"  - Mistral-7B-Instruct-v0.2.Q4_K_M.gguf (smaller, ~4GB)\n"
-            f"  - Mixtral-8x7B-Instruct-v0.1.Q4_K_M.gguf (better quality, ~26GB)\n\n"
-            f"Download from: https://huggingface.co/TheBloke"
+            f"Please download the OpenAI gpt-oss-20b model:\n\n"
+            f"Option 1: Using Ollama (Easiest)\n"
+            f"  ollama pull gpt-oss:20b\n"
+            f"  Model will be in: ~/.ollama/models/\n\n"
+            f"Option 2: Direct Download from HuggingFace\n"
+            f"  huggingface-cli download openai/gpt-oss-20b --include 'original/*' --local-dir models/gpt-oss-20b/\n\n"
+            f"Option 3: Using transformers (for GGUF conversion)\n"
+            f"  pip install transformers\n"
+            f"  # Then convert to GGUF format\n\n"
+            f"Model Info:\n"
+            f"  - gpt-oss-20b: 21B params, 3.6B active (MoE)\n"
+            f"  - Memory: ~16GB RAM with MXFP4 quantization\n"
+            f"  - License: Apache 2.0 (fully permissive)\n\n"
+            f"More info: https://huggingface.co/openai/gpt-oss-20b"
         )
 
     return True
