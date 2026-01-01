@@ -38,8 +38,8 @@ pydantic==2.5.3  # Data validation
 # Embeddings
 sentence-transformers==2.2.2  # For semantic search
 transformers==4.36.2  # Transformers library
-torch==2.1.2  # PyTorch (CPU version)
-torchvision==0.16.2
+torch==2.2.0  # PyTorch (CPU version)
+torchvision==0.17.0
 
 # For GPU-accelerated embeddings (optional):
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
