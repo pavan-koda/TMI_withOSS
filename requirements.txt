@@ -15,8 +15,9 @@ Pillow==10.1.0  # Image processing
 # ============================================================================
 
 # Transformers library for gpt-oss-20b (21B params, 3.6B active)
-transformers==4.36.2  # Transformers library with auto device mapping
-accelerate==0.25.0  # For efficient multi-GPU and CPU+GPU offloading
+transformers>=4.46.0  # Transformers library with gpt-oss support (requires >=4.46)
+accelerate>=0.25.0  # For efficient multi-GPU and CPU+GPU offloading
+kernels  # Required for gpt-oss models (OpenAI kernels package)
 
 # ============================================================================
 # VECTOR SEARCH & EMBEDDINGS

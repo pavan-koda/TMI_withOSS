@@ -89,16 +89,15 @@ class PDFQAEngine:
 
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path,
-                trust_remote_code=True
+                self.model_path
             )
 
             # Load model with automatic device mapping (CPU+GPU offloading)
+            # Using torch_dtype="auto" as recommended for gpt-oss models
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 device_map="auto",  # Automatic CPU+GPU offloading
-                torch_dtype=torch.float16,  # Use FP16 for efficiency
-                trust_remote_code=True,
+                torch_dtype="auto",  # Auto dtype selection (BF16/U8 for gpt-oss)
                 low_cpu_mem_usage=True
             )
 
@@ -109,13 +108,12 @@ class PDFQAEngine:
             logger.error(f"Failed to load gpt-oss-20b: {e}")
             logger.info("Falling back to CPU-only mode...")
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path,
-                trust_remote_code=True
+                self.model_path
             )
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
-                torch_dtype=torch.float32,
-                trust_remote_code=True
+                torch_dtype="auto",
+                low_cpu_mem_usage=True
             )
             self.device = torch.device("cpu")
             self.model.to(self.device)
