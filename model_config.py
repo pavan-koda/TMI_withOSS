@@ -139,8 +139,15 @@ SYSTEM_REQUIREMENTS = {
 # ============================================================================
 
 def get_model_path():
-    """Get absolute model path."""
-    model_path = Path(MODEL_CONFIG["model_path"])
+    """Get model path (HuggingFace model ID or absolute local path)."""
+    model_path_str = MODEL_CONFIG["model_path"]
+
+    # If it's a HuggingFace model ID (contains '/'), return as-is
+    if '/' in model_path_str and not model_path_str.startswith('/'):
+        return model_path_str
+
+    # Otherwise, treat as local path and make it absolute
+    model_path = Path(model_path_str)
 
     if not model_path.is_absolute():
         # If relative path, make it relative to this config file
