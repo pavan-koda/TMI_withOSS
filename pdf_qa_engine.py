@@ -15,7 +15,7 @@ import numpy as np
 
 # Import transformers for gpt-oss-20b
 try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import pipeline
     import torch
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -83,41 +83,31 @@ class PDFQAEngine:
             logger.error(str(e))
             raise
 
-        # Load gpt-oss-20b with transformers
+        # Load gpt-oss-20b with transformers pipeline API
         logger.info("Loading gpt-oss-20b model (this may take 1-2 minutes)...")
-        logger.info("Model will be downloaded from HuggingFace on first run (~16GB)")
+        logger.info("Model will be downloaded from HuggingFace on first run (~41GB)")
+        logger.info("Runtime memory usage will be ~16GB due to MXFP4 quantization")
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path
-            )
-
-            # Load model with automatic device mapping (CPU+GPU offloading)
-            # Using torch_dtype="auto" as recommended for gpt-oss models
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_path,
-                device_map="auto",  # Automatic CPU+GPU offloading
+            # Use the pipeline API as recommended for gpt-oss models
+            # This automatically handles the Harmony response format
+            self.pipe = pipeline(
+                "text-generation",
+                model=self.model_path,
                 torch_dtype="auto",  # Auto dtype selection (BF16/U8 for gpt-oss)
-                low_cpu_mem_usage=True
+                device_map="auto",  # Automatic CPU+GPU offloading
             )
 
-            logger.info(f"gpt-oss-20b loaded successfully with device_map='auto'!")
-            logger.info(f"Model device map: {self.model.hf_device_map if hasattr(self.model, 'hf_device_map') else 'N/A'}")
+            logger.info(f"gpt-oss-20b loaded successfully with pipeline API!")
+            logger.info(f"Model: {self.model_path}")
+
+            # Store device info if available
+            if hasattr(self.pipe.model, 'hf_device_map'):
+                logger.info(f"Device map: {self.pipe.model.hf_device_map}")
 
         except Exception as e:
             logger.error(f"Failed to load gpt-oss-20b: {e}")
-            logger.info("Falling back to CPU-only mode...")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path
-            )
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_path,
-                torch_dtype="auto",
-                low_cpu_mem_usage=True
-            )
-            self.device = torch.device("cpu")
-            self.model.to(self.device)
-            logger.info("Model loaded on CPU")
+            raise RuntimeError(f"Could not initialize gpt-oss-20b model: {e}")
 
         # Initialize ChromaDB for document storage
         self.chroma_client = chromadb.PersistentClient(
@@ -438,39 +428,21 @@ class PDFQAEngine:
             # Build chat messages in Harmony format for gpt-oss-20b
             messages = self._build_chat_messages(question, context, history_text)
 
-            # Generate answer with LLM
+            # Generate answer with LLM using pipeline API
             logger.info(f"Generating answer for: {question[:50]}...")
 
-            # Apply chat template
-            prompt = self.tokenizer.apply_chat_template(
+            # Use the pipeline - it automatically handles Harmony format
+            outputs = self.pipe(
                 messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-
-            # Tokenize and generate
-            inputs = self.tokenizer(prompt, return_tensors="pt")
-
-            # Move inputs to the same device as the model's first parameter
-            if hasattr(self.model, 'device'):
-                device = self.model.device
-            else:
-                device = next(self.model.parameters()).device
-
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-
-            outputs = self.model.generate(
-                **inputs,
                 max_new_tokens=MODEL_CONFIG["max_tokens"],
                 temperature=MODEL_CONFIG["temperature"],
                 top_p=MODEL_CONFIG["top_p"],
-                top_k=MODEL_CONFIG["top_k"],
                 do_sample=True,
-                pad_token_id=self.tokenizer.eos_token_id if self.tokenizer.eos_token_id else self.tokenizer.pad_token_id
             )
 
-            # Decode only the generated part (skip the prompt)
-            answer = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
+            # Extract the answer from pipeline output
+            # Pipeline returns: [{'generated_text': [messages + generated message]}]
+            answer = outputs[0]["generated_text"][-1]["content"].strip()
 
             # Calculate confidence score
             confidence = self._calculate_confidence(
