@@ -13,9 +13,9 @@ import chromadb
 from chromadb.config import Settings
 import numpy as np
 
-# Import transformers for GPT-2
+# Import transformers for gpt-oss-20b
 try:
-    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+    from transformers import AutoTokenizer, AutoModelForCausalLM
     import torch
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -36,12 +36,12 @@ logger = logging.getLogger(__name__)
 
 class PDFQAEngine:
     """
-    QA Engine using 20B parameter LLM with CPU+GPU offloading.
+    QA Engine using OpenAI gpt-oss-20b (21B params, 3.6B active) with CPU+GPU offloading.
     Features:
     - Multi-page answer support with exact page references
     - Confidence scoring (0-100%)
     - Response time optimization (5-15 seconds target)
-    - Memory efficient with GGUF quantization
+    - Memory efficient with MXFP4 quantization (16GB RAM + 2.5GB VRAM)
     """
 
     def __init__(
@@ -68,7 +68,7 @@ class PDFQAEngine:
 
         # Model configuration
         self.model_path = model_path or get_model_path()
-        self.n_gpu_layers = n_gpu_layers if n_gpu_layers is not None else MODEL_CONFIG["n_gpu_layers"]
+        self.n_gpu_layers = n_gpu_layers if n_gpu_layers is not None else MODEL_CONFIG.get("n_gpu_layers", 0)
         self.n_ctx = n_ctx
 
         logger.info(f"Initializing PDF QA Engine")
@@ -83,19 +83,43 @@ class PDFQAEngine:
             logger.error(str(e))
             raise
 
-        # Load LLM with transformers
-        logger.info("Loading GPT-2 model (this may take 30-60 seconds)...")
-        self.tokenizer = GPT2Tokenizer.from_pretrained(self.model_path)
-        self.model = GPT2LMHeadModel.from_pretrained(self.model_path)
-        
-        # Set pad token
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        
-        # Move to GPU if available
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-        
-        logger.info(f"GPT-2 model loaded successfully on {self.device}!")
+        # Load gpt-oss-20b with transformers
+        logger.info("Loading gpt-oss-20b model (this may take 1-2 minutes)...")
+        logger.info("Model will be downloaded from HuggingFace on first run (~16GB)")
+
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path,
+                trust_remote_code=True
+            )
+
+            # Load model with automatic device mapping (CPU+GPU offloading)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                device_map="auto",  # Automatic CPU+GPU offloading
+                torch_dtype=torch.float16,  # Use FP16 for efficiency
+                trust_remote_code=True,
+                low_cpu_mem_usage=True
+            )
+
+            logger.info(f"gpt-oss-20b loaded successfully with device_map='auto'!")
+            logger.info(f"Model device map: {self.model.hf_device_map if hasattr(self.model, 'hf_device_map') else 'N/A'}")
+
+        except Exception as e:
+            logger.error(f"Failed to load gpt-oss-20b: {e}")
+            logger.info("Falling back to CPU-only mode...")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path,
+                trust_remote_code=True
+            )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                torch_dtype=torch.float32,
+                trust_remote_code=True
+            )
+            self.device = torch.device("cpu")
+            self.model.to(self.device)
+            logger.info("Model loaded on CPU")
 
         # Initialize ChromaDB for document storage
         self.chroma_client = chromadb.PersistentClient(
@@ -413,22 +437,41 @@ class PDFQAEngine:
                     history_text += f"Q{i}: {exchange['question']}\n"
                     history_text += f"A{i}: {exchange['answer'][:150]}...\n\n"
 
-            # Build prompt for LLM
-            prompt = self._build_prompt(question, context, history_text)
+            # Build chat messages in Harmony format for gpt-oss-20b
+            messages = self._build_chat_messages(question, context, history_text)
 
             # Generate answer with LLM
             logger.info(f"Generating answer for: {question[:50]}...")
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+
+            # Apply chat template
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            # Tokenize and generate
+            inputs = self.tokenizer(prompt, return_tensors="pt")
+
+            # Move inputs to the same device as the model's first parameter
+            if hasattr(self.model, 'device'):
+                device = self.model.device
+            else:
+                device = next(self.model.parameters()).device
+
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+
             outputs = self.model.generate(
-                inputs['input_ids'],
-                max_length=inputs['input_ids'].shape[1] + MODEL_CONFIG["max_tokens"],
+                **inputs,
+                max_new_tokens=MODEL_CONFIG["max_tokens"],
                 temperature=MODEL_CONFIG["temperature"],
                 top_p=MODEL_CONFIG["top_p"],
                 top_k=MODEL_CONFIG["top_k"],
                 do_sample=True,
-                pad_token_id=self.tokenizer.eos_token_id,
-                eos_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.eos_token_id if self.tokenizer.eos_token_id else self.tokenizer.pad_token_id
             )
+
+            # Decode only the generated part (skip the prompt)
             answer = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
 
             # Calculate confidence score
@@ -468,9 +511,9 @@ class PDFQAEngine:
                 'images': []
             }
 
-    def _build_prompt(self, question: str, context: str, history: str = "") -> str:
+    def _build_chat_messages(self, question: str, context: str, history: str = "") -> list:
         """
-        Build prompt for LLM.
+        Build chat messages in Harmony format for gpt-oss-20b.
 
         Args:
             question: User question
@@ -478,26 +521,32 @@ class PDFQAEngine:
             history: Conversation history
 
         Returns:
-            Formatted prompt
+            List of chat messages in Harmony format
         """
-        prompt = f"""You are a helpful AI assistant that answers questions about documents accurately and comprehensively.
+        system_message = """You are a helpful AI assistant that answers questions about documents accurately and comprehensively.
 
 Instructions:
 - Provide detailed, complete answers based on the context
 - If the answer spans multiple pages, cite all relevant page numbers
 - Include specific details and examples from the text
 - If information is not in the context, say so clearly
-- Be thorough but focused on answering the question
+- Be thorough but focused on answering the question"""
 
-{history}
-Context from document:
-{context}
+        # Build user message with context and history
+        user_content = ""
 
-Question: {question}
+        if history:
+            user_content += f"{history}\n\n"
 
-Answer (be detailed and comprehensive):"""
+        user_content += f"Context from document:\n{context}\n\nQuestion: {question}"
 
-        return prompt
+        # Return messages in chat format
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_content}
+        ]
+
+        return messages
 
     def _collect_page_images(self, session_id: str, pages: List[int]) -> List[str]:
         """

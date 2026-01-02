@@ -11,11 +11,12 @@ pypdf==3.17.4  # Backup PDF library
 Pillow==10.1.0  # Image processing
 
 # ============================================================================
-# LLM INFERENCE - Transformers for GPT-2
+# LLM INFERENCE - Transformers for gpt-oss-20b
 # ============================================================================
 
-# Transformers library for GPT-2
-transformers==4.36.2  # Transformers library
+# Transformers library for gpt-oss-20b (21B params, 3.6B active)
+transformers==4.36.2  # Transformers library with auto device mapping
+accelerate==0.25.0  # For efficient multi-GPU and CPU+GPU offloading
 
 # ============================================================================
 # VECTOR SEARCH & EMBEDDINGS
@@ -28,9 +29,8 @@ pydantic==2.5.3  # Data validation
 
 # Embeddings
 sentence-transformers==2.2.2  # For semantic search
-transformers==4.36.2  # Transformers library
-torch==2.2.0  # PyTorch (CPU version)
-torchvision==0.17.0
+torch==2.2.0  # PyTorch (CPU version by default)
+torchvision==0.17.0  # Vision utilities
 
 # For GPU-accelerated embeddings (optional):
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
@@ -91,23 +91,28 @@ psutil==5.9.6  # System resource monitoring
 # ============================================================================
 
 # 1. For GPU support (NVIDIA with CUDA):
-#    CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
+#    Install PyTorch with CUDA support first:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#    Then install remaining requirements:
+#    pip install -r requirements.txt
 #
 # 2. For CPU-only (no GPU):
 #    pip install -r requirements.txt
 #
-# 3. Download GPT-2 Medium model (required):
-#    The start_app.sh script will download it automatically using transformers
-#    Model will be saved to: ./gpt2-medium/
-#    Source: https://huggingface.co/openai-community/gpt2-medium
+# 3. Model Download (gpt-oss-20b):
+#    The model will be downloaded automatically from HuggingFace on first run
+#    Model: openai/gpt-oss-20b (21B params, 3.6B active, MoE architecture)
+#    Download size: ~16GB
+#    Location: ~/.cache/huggingface/hub/
 #
 # 4. System Requirements:
-#    - RAM: 16GB+ (model needs ~12GB)
-#    - GPU: NVIDIA with 4GB VRAM (for offloading)
-#    - Storage: 15GB+ (model + dependencies)
-#    - OS: Ubuntu 24 (tested) or similar Linux
+#    - RAM: 16GB+ (model needs ~16GB with MXFP4 quantization)
+#    - GPU: NVIDIA with 4GB VRAM (for CPU+GPU offloading)
+#    - Storage: 20GB+ (model + dependencies + cache)
+#    - OS: Ubuntu 24 (tested) or Windows with WSL2
 #
 # 5. Expected Performance:
 #    - Response time: 5-15 seconds (with GPU offload)
-#    - Throughput: ~10-30 tokens/second
+#    - Throughput: 20-30 tokens/second
 #    - Context window: 4096 tokens
+#    - VRAM usage: ~2.5GB (15 layers on GPU)

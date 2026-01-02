@@ -11,25 +11,32 @@ from pathlib import Path
 # ============================================================================
 
 MODEL_CONFIG = {
-    # Model file path (local directory for transformers)
-    # GPT-2 Medium: 355M parameters
-    # Download from: https://huggingface.co/openai-community/gpt2-medium
-    "model_path": os.getenv("MODEL_PATH", "./gpt2-oss"),
+    # Model identifier (HuggingFace model name or local path)
+    # OpenAI gpt-oss-20b: 21B total params, 3.6B active (MoE)
+    # Will be downloaded automatically from HuggingFace on first run (~16GB)
+    "model_path": os.getenv("MODEL_PATH", "openai/gpt-oss-20b"),
 
     # Model type
-    "model_type": "gpt2",  # GPT-2 architecture
+    "model_type": "gpt-oss",  # OpenAI gpt-oss architecture (MoE)
 
     # Context window
-    "n_ctx": 1024,  # GPT-2 context window
+    "n_ctx": 4096,  # gpt-oss-20b context window
 
-    # GPU offloading (for transformers, use GPU if available)
+    # GPU offloading (automatic with device_map="auto")
+    # Transformers will automatically distribute layers between CPU and GPU
     "device": "auto",  # auto, cpu, cuda
 
+    # CPU threads for CPU layers (when using mixed CPU+GPU)
+    "n_threads": 8,  # Recommended: number of CPU cores / 2
+
     # Generation settings
-    "max_tokens": 512,  # Maximum answer length (GPT-2 limit)
-    "temperature": 0.7,  # Lower = more focused, higher = more creative (0.0-1.0)
-    "top_p": 0.9,  # Nucleus sampling
-    "top_k": 50,  # Top-k sampling
+    "max_tokens": 2048,  # Maximum answer length
+    "temperature": 0.3,  # Lower = more focused, higher = more creative (0.0-1.0)
+    "top_p": 0.95,  # Nucleus sampling
+    "top_k": 40,  # Top-k sampling
+
+    # GPU layers estimate (for reference - actual handled by device_map="auto")
+    "n_gpu_layers": 15,  # Estimated layers on GPU for 4GB VRAM
 }
 
 # ============================================================================
@@ -143,36 +150,38 @@ def get_model_path():
     return str(model_path)
 
 def validate_model_exists():
-    """Check if model directory and required files exist."""
+    """Check if model is available (local or will be downloaded from HuggingFace)."""
     model_path = get_model_path()
 
+    # If it's a HuggingFace model ID (contains '/'), it will be auto-downloaded
+    if '/' in model_path:
+        print(f"Model will be downloaded from HuggingFace: {model_path}")
+        print("First run will download ~16GB model files")
+        return True
+
+    # If it's a local path, check if it exists
     if not Path(model_path).exists():
         raise FileNotFoundError(
             f"Model directory not found: {model_path}\n\n"
-            f"Please download the GPT-2 OSS model:\n\n"
-            f"Option 1: Using Python script\n"
-            f"  python -c \"\n"
-            f"  from transformers import GPT2LMHeadModel, GPT2Tokenizer\n"
-            f"  tokenizer = GPT2Tokenizer.from_pretrained('openai-community/gpt2-medium')\n"
-            f"  model = GPT2LMHeadModel.from_pretrained('openai-community/gpt2-medium')\n"
-            f"  tokenizer.save_pretrained('./gpt2-oss')\n"
-            f"  model.save_pretrained('./gpt2-oss')\n"
-            f"  \"\n\n"
-            f"Option 2: Manual download\n"
-            f"  Visit: https://huggingface.co/openai-community/gpt2-medium\n"
-            f"  Download the model files and place in ./gpt2-oss/\n\n"
+            f"Please download the gpt-oss-20b model:\n\n"
+            f"Option 1: Use HuggingFace model ID (recommended)\n"
+            f"  Set MODEL_PATH=openai/gpt-oss-20b\n"
+            f"  Model will be downloaded automatically\n\n"
+            f"Option 2: Download manually\n"
+            f"  Visit: https://huggingface.co/openai/gpt-oss-20b\n"
+            f"  Download the model files and place in local directory\n\n"
             f"See INSTALL_GPT_OSS.md for detailed instructions"
         )
 
-    # Check for required files
-    required_files = ['config.json', 'pytorch_model.bin', 'vocab.json']
+    # Check for required files in local directory
+    required_files = ['config.json']
     missing_files = [f for f in required_files if not (Path(model_path) / f).exists()]
 
     if missing_files:
         raise FileNotFoundError(
             f"Model directory found but missing required files: {missing_files}\n"
             f"Model path: {model_path}\n\n"
-            f"Please re-download the GPT-2 OSS model.\n\n"
+            f"Please re-download the gpt-oss-20b model.\n\n"
             f"See INSTALL_GPT_OSS.md for detailed instructions"
         )
 
@@ -212,12 +221,10 @@ def print_config():
     print(f"Model Path: {get_model_path()}")
     print(f"Model Type: {MODEL_CONFIG['model_type']}")
     print(f"Context Window: {MODEL_CONFIG['n_ctx']} tokens")
-    if MODEL_CONFIG['model_type'] == 'gpt2':
-        print(f"Device: {MODEL_CONFIG['device']}")
-    else:
-        print(f"GPU Layers: {MODEL_CONFIG.get('n_gpu_layers', 'N/A')}")
-        print(f"Estimated VRAM: {estimate_vram_usage()} GB")
-        print(f"CPU Threads: {MODEL_CONFIG.get('n_threads', 'N/A')}")
+    print(f"Device Mapping: {MODEL_CONFIG['device']}")
+    print(f"Estimated GPU Layers: {MODEL_CONFIG.get('n_gpu_layers', 'N/A')}")
+    print(f"Estimated VRAM: {estimate_vram_usage()} GB")
+    print(f"CPU Threads: {MODEL_CONFIG.get('n_threads', 'N/A')}")
     print(f"Max Answer Length: {MODEL_CONFIG['max_tokens']} tokens")
     print("="*80)
     print(f"Target Response Time: {INFERENCE_CONFIG['target_response_time']}s")

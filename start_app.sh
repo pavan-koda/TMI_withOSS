@@ -4,10 +4,10 @@
 
 set -e
 
-echo "========================================================================"
+echo "========================================================================="
 echo "   PDF Q&A SYSTEM WITH GPT-OSS-20B"
-echo "   Powered by OpenAI's gpt-oss-20b (21B params, Apache 2.0)"
-echo "========================================================================"
+echo "   Powered by OpenAI's gpt-oss-20b (21B params, 3.6B active, Apache 2.0)"
+echo "========================================================================="
 echo
 
 # Colors for output
@@ -69,53 +69,45 @@ else
 fi
 echo
 
-# Check if Ollama is installed (optional, for easy model download)
-echo "[5/7] Checking for Ollama (optional)..."
-if command -v ollama &> /dev/null; then
-    echo "Ollama found: $(ollama --version)"
-    OLLAMA_AVAILABLE=true
+# Check for GPU (optional)
+echo "[5/7] Checking for GPU..."
+if command -v nvidia-smi &> /dev/null; then
+    echo "NVIDIA GPU detected:"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+    echo "GPU will be used for model inference (faster response times)"
 else
-    echo "Ollama not found (optional - can download model manually)"
-    OLLAMA_AVAILABLE=false
+    echo "No NVIDIA GPU detected. Using CPU-only mode."
+    echo "Response times may be slower (30-60s instead of 5-15s)"
 fi
 echo
 
 # Check if model exists
-echo "[6/7] Checking for GPT-2 OSS model..."
-MODEL_PATH=$(python -c "from model_config import get_model_path; print(get_model_path())" 2>/dev/null || echo "./gpt2-oss")
+echo "[6/7] Checking for gpt-oss-20b model..."
+MODEL_PATH=$(python -c "from model_config import get_model_path; print(get_model_path())" 2>/dev/null || echo "openai/gpt-oss-20b")
 
-if [ ! -d "$MODEL_PATH" ]; then
+# Check if model path is a HuggingFace model ID (contains '/')
+if [[ "$MODEL_PATH" == *"/"* ]]; then
+    echo -e "${GREEN}Model will be auto-downloaded from HuggingFace: $MODEL_PATH${NC}"
+    echo "Model will be downloaded on first run (~16GB)"
+    echo "Download location: ~/.cache/huggingface/hub/"
+    echo
+    echo "To pre-download the model now (optional), you can run:"
+    echo "  python -c \"from transformers import AutoModelForCausalLM, AutoTokenizer; AutoTokenizer.from_pretrained('$MODEL_PATH'); AutoModelForCausalLM.from_pretrained('$MODEL_PATH', device_map='auto', torch_dtype='float16')\""
+    echo
+elif [ ! -d "$MODEL_PATH" ]; then
     echo
     echo "========================================================================"
-    echo -e "${YELLOW}WARNING: GPT-2 OSS model not found${NC}"
+    echo -e "${YELLOW}WARNING: gpt-oss-20b model not found${NC}"
     echo "========================================================================"
     echo
     echo "Model path: $MODEL_PATH"
     echo
-
-    echo "Downloading GPT-2 OSS model using transformers..."
+    echo "The model will be downloaded automatically from HuggingFace on first run."
+    echo "Alternatively, you can set MODEL_PATH=openai/gpt-oss-20b in your environment."
     echo
-    python -c "
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-print('Downloading GPT-2 OSS model...')
-tokenizer = GPT2Tokenizer.from_pretrained('openai-community/gpt2-medium')
-model = GPT2LMHeadModel.from_pretrained('openai-community/gpt2-medium')
-print('Saving model locally...')
-tokenizer.save_pretrained('./gpt2-oss')
-model.save_pretrained('./gpt2-oss')
-print('Model downloaded successfully!')
-"
-
-    if [ $? -eq 0 ]; then
-        echo
-        echo -e "${GREEN}Model downloaded successfully!${NC}"
-        echo
-    else
-        echo
-        echo -e "${RED}Failed to download model${NC}"
-        echo "Please download manually from https://huggingface.co/openai-community/gpt2-medium"
-        exit 1
-    fi
+    echo "Download size: ~16GB"
+    echo "See INSTALL_GPT_OSS.md for detailed instructions"
+    echo
 else
     echo -e "${GREEN}Model found: $MODEL_PATH${NC}"
 fi
