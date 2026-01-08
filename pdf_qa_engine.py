@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class PDFQAEngine:
     def __init__(self, model_name="mistral", base_url="http://localhost:11434"):
-        self.llm = ChatOllama(model=model_name, base_url=base_url)
+        self.llm = ChatOllama(model=model_name, base_url=base_url, streaming=True)
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self.vector_store = None
         self.qa_chain = None
@@ -58,7 +58,7 @@ class PDFQAEngine:
         text = text.lower().strip(" .!,")
         return text in greetings
 
-    def answer_question(self, question):
+    def answer_question(self, question, callbacks=None):
         start_time = time.time()
         
         # Quick greeting check
@@ -76,7 +76,7 @@ class PDFQAEngine:
                 "source_documents": []
             }
         
-        response = self.qa_chain.invoke({"query": question})
+        response = self.qa_chain.invoke({"query": question}, config={"callbacks": callbacks})
         end_time = time.time()
         
         return {
