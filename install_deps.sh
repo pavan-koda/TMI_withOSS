@@ -35,9 +35,9 @@ pip install Pillow==10.1.0
 
 echo
 echo "Installing AI/ML libraries..."
-pip install transformers==4.36.2
-pip install torch==2.1.2
-pip install torchvision==0.16.2
+pip install transformers>=4.46.0
+pip install torch==2.2.0
+pip install torchvision==0.17.0
 pip install sentence-transformers==2.2.2
 
 echo

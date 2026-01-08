@@ -17,6 +17,7 @@ Pillow==10.1.0  # Image processing
 # Transformers library for gpt-oss-20b (21B params, 3.6B active)
 transformers>=4.46.0  # Transformers library with gpt-oss support (requires >=4.46)
 accelerate>=0.25.0  # For efficient multi-GPU and CPU+GPU offloading
+tokenizers>=0.20.0  # Required for newer model formats
 openai-harmony  # Required for gpt-oss models (Harmony response format)
 gpt-oss  # OpenAI's gpt-oss package with reference implementation
 

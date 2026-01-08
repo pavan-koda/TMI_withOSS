@@ -46,7 +46,21 @@ echo
 echo "[4/7] Checking dependencies..."
 
 # Quick check for key packages
-if ! python -c "import flask" 2>/dev/null || ! python -c "import fitz" 2>/dev/null || ! python -c "import tqdm" 2>/dev/null; then
+NEED_INSTALL=false
+
+# Check if transformers is installed and recent enough (>=4.46.0)
+if python -c "import transformers" 2>/dev/null; then
+    VER=$(python -c "import transformers; print(transformers.__version__)")
+    # Check if version starts with 4.3 or lower (simple check)
+    if [[ "$VER" == 4.3* ]] || [[ "$VER" == 4.2* ]] || [[ "$VER" == 3.* ]]; then
+        echo "Found transformers $VER, but >= 4.46.0 is required."
+        NEED_INSTALL=true
+    fi
+else
+    NEED_INSTALL=true
+fi
+
+if [ "$NEED_INSTALL" = true ] || ! python -c "import flask" 2>/dev/null || ! python -c "import fitz" 2>/dev/null; then
     echo "Installing dependencies (this may take a few minutes)..."
     pip install --upgrade pip --quiet
 

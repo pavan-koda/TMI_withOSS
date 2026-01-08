@@ -20,8 +20,8 @@ pip install \
     PyMuPDF==1.23.8 \
     Pillow==10.1.0 \
     chromadb==0.4.22 \
-    transformers==4.36.2 \
-    torch==2.1.2 \
+    transformers>=4.46.0 \
+    torch==2.2.0 \
     sentence-transformers==2.2.2 \
     faiss-cpu==1.7.4 \
     numpy==1.26.2 \
