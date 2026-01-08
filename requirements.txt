@@ -1,120 +1,21 @@
-# PDF Q&A System with 20B LLM (CPU+GPU Offload)
-# Updated for Transformers backend with gpt-oss-20b (MoE) support
+# PDF Chat Application with Mistral 7B (Ollama) + Streamlit
 
-# Core Flask and Web
-Flask==3.0.0
-Werkzeug==3.0.1
+# Core UI
+streamlit>=1.30.0
+
+# Langchain & AI
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-core>=0.1.0
+langchain-ollama>=0.0.1
+
+# Vector Store & Embeddings
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2
 
 # PDF Processing
-PyMuPDF==1.23.8  # Best for PDF text extraction and image handling
-pypdf==3.17.4  # Backup PDF library
-Pillow==10.1.0  # Image processing
+pypdf>=3.17.0
 
-# ============================================================================
-# LLM INFERENCE - Transformers for gpt-oss-20b
-# ============================================================================
-
-# Transformers library for gpt-oss-20b (21B params, 3.6B active)
-transformers>=4.46.0  # Transformers library with gpt-oss support (requires >=4.46)
-accelerate>=0.26.0  # For efficient multi-GPU and CPU+GPU offloading
-tokenizers>=0.20.0  # Required for newer model formats
-kernels  # Required for gpt-oss models
-
-# ============================================================================
-# VECTOR SEARCH & EMBEDDINGS
-# ============================================================================
-
-# ChromaDB for document search
-chromadb>=0.4.22
-hnswlib==0.8.0  # Fast vector search
-pydantic==2.5.3  # Data validation
-
-# Embeddings
-sentence-transformers>=2.7.0  # For semantic search
-torch==2.2.0  # PyTorch (CPU version by default)
-torchvision==0.17.0  # Vision utilities
-
-# For GPU-accelerated embeddings (optional):
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# Alternative vector stores
-faiss-cpu==1.8.0  # For CPU - for GPU use: faiss-gpu
-
-# ============================================================================
-# TEXT PROCESSING & NLP
-# ============================================================================
-
-# Text chunking and processing
-tiktoken>=0.5.2  # Token counting for GPT models
-langchain>=0.1.0  # Document processing utilities
-langchain-community>=0.0.10  # Community extensions
-
-# ============================================================================
-# UTILITIES
-# ============================================================================
-
-numpy>=1.26.2  # Numerical operations
-scipy==1.11.4  # Scientific computing
-tqdm==4.66.1  # Progress bars
-python-dotenv==1.0.0  # Environment variables
-requests==2.31.0  # HTTP client
-
-# ============================================================================
-# ANALYTICS & MONITORING
-# ============================================================================
-
-# Logging
-python-json-logger==2.0.7
-colorlog==6.8.0
-
-# Performance monitoring
-psutil==5.9.6  # System resource monitoring
-
-# ============================================================================
-# OPTIONAL: Advanced Features
-# ============================================================================
-
-# ColPali for visual document retrieval (OPTIONAL)
-# Uncomment if you want visual search capabilities:
-# colpali-engine>=0.1.0
-# einops==0.7.0
-# safetensors==0.4.1
-
-# ============================================================================
-# DEVELOPMENT TOOLS (Optional)
-# ============================================================================
-
-# pytest==7.4.3  # Testing
-# black==23.12.1  # Code formatting
-# flake8==7.0.0  # Linting
-
-# ============================================================================
-# INSTALLATION NOTES
-# ============================================================================
-
-# 1. For GPU support (NVIDIA with CUDA):
-#    Install PyTorch with CUDA support first:
-#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-#    Then install remaining requirements:
-#    pip install -r requirements.txt
-#
-# 2. For CPU-only (no GPU):
-#    pip install -r requirements.txt
-#
-# 3. Model Download (gpt-oss-20b):
-#    The model will be downloaded automatically from HuggingFace on first run
-#    Model: openai/gpt-oss-20b (21B params, 3.6B active, MoE architecture)
-#    Download size: ~16GB
-#    Location: ~/.cache/huggingface/hub/
-#
-# 4. System Requirements:
-#    - RAM: 16GB+ (model needs ~16GB with MXFP4 quantization)
-#    - GPU: NVIDIA with 4GB VRAM (for CPU+GPU offloading)
-#    - Storage: 20GB+ (model + dependencies + cache)
-#    - OS: Ubuntu 24 (tested) or Windows with WSL2
-#
-# 5. Expected Performance:
-#    - Response time: 5-15 seconds (with GPU offload)
-#    - Throughput: 20-30 tokens/second
-#    - Context window: 4096 tokens
-#    - VRAM usage: ~2.5GB (15 layers on GPU)
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0

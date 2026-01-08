@@ -162,6 +162,7 @@ async function askQuestion() {
     isGenerating = true;
     askBtn.textContent = 'Stop Generating';
     askBtn.classList.add('stop-mode'); // You can style this class in CSS to be red
+    askBtn.style.backgroundColor = '#dc3545'; // Force red color for visibility
     
     // Create abort controller for this request
     abortController = new AbortController();
@@ -169,7 +170,8 @@ async function askQuestion() {
     showLoading('Generating Answer', 'AI is thinking...');
 
     try {
-        const response = await fetch('/ask', {
+        // Use streaming endpoint
+        const response = await fetch('/stream_ask', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -178,30 +180,68 @@ async function askQuestion() {
             signal: abortController.signal
         });
 
-        const data = await response.json();
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to generate answer');
+        }
 
-        if (response.ok && data.success) {
-            addMessageToChat(data.answer, 'answer');
-            hideStatus();
-        } else {
-            showStatus(data.error || 'Failed to generate answer', 'error');
-            // Remove the question from chat if answer failed
-            const lastMessage = chatHistory.lastElementChild;
-            if (lastMessage) {
-                lastMessage.remove();
+        // Create answer message container immediately
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'chat-message';
+        
+        const label = document.createElement('div');
+        label.className = 'message-label answer';
+        label.innerHTML = '🤖 Answer:';
+        
+        const content = document.createElement('div');
+        content.className = 'message-content answer';
+        
+        messageDiv.appendChild(label);
+        messageDiv.appendChild(content);
+        chatHistory.appendChild(messageDiv);
+
+        // Read the stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop(); // Keep incomplete chunk
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6);
+                    if (dataStr === '[DONE]') continue;
+                    
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.token) {
+                            content.textContent += data.token;
+                            // Auto-scroll
+                            chatHistory.scrollTop = chatHistory.scrollHeight;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing SSE:', e);
+                    }
+                }
             }
         }
+        
+        hideStatus();
+
     } catch (error) {
         if (error.name === 'AbortError') {
             showStatus('Generation stopped by user', 'success');
         } else {
             console.error('Error:', error);
-            showStatus('An error occurred while generating the answer', 'error');
-            // Remove the question from chat if answer failed
-            const lastMessage = chatHistory.lastElementChild;
-            if (lastMessage) {
-                lastMessage.remove();
-            }
+            showStatus(error.message || 'An error occurred while generating the answer', 'error');
         }
     } finally {
         hideLoading();
@@ -209,6 +249,7 @@ async function askQuestion() {
         abortController = null;
         askBtn.textContent = 'Ask Question';
         askBtn.classList.remove('stop-mode');
+        askBtn.style.backgroundColor = ''; // Reset color
         questionInput.focus();
     }
 }
