@@ -9,20 +9,25 @@ from model_config import MODEL_CONFIG
 st.set_page_config(page_title="Chat with PDF", layout="wide")
 
 class StreamHandler(BaseCallbackHandler):
-    def __init__(self, container, initial_text=""):
+    def __init__(self, container, initial_text="", message_context=None):
         self.container = container
         self.text = initial_text
         self.token_count = 0
+        self.message_context = message_context
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.text += token
         self.token_count += 1
         # Add cursor effect for smoother appearance
         self.container.markdown(self.text + "▌")
+        if self.message_context is not None:
+            self.message_context["content"] = self.text
 
     def on_llm_end(self, _response, **_kwargs) -> None:
         # Remove cursor when done
         self.container.markdown(self.text)
+        if self.message_context is not None:
+            self.message_context["content"] = self.text
 
 def main():
     st.title("📄 Chat with PDF")
@@ -38,6 +43,12 @@ def main():
         background-color: rgba(0,0,0,0.05);
         padding: 2px 6px;
         border-radius: 4px;
+    }
+    /* Page button styling to match caption font */
+    .stButton button {
+        font-family: monospace;
+        font-size: 0.8rem;
+        padding: 2px 8px;
     }
     /* Stop button styling - Floating square button */
     div:has(> span#stop-btn-anchor) + div button {
@@ -117,22 +128,36 @@ def main():
             with st.chat_message("assistant", avatar="🤖"):
                 st.markdown(message["content"])
                 # Inline Metadata
-                meta = []
-                if "timestamp" in message: meta.append(f"🕒 {message['timestamp']}")
-                if "response_time" in message and message["response_time"] > 0: meta.append(f"⏱️ {message['response_time']:.2f}s")
-                if meta: st.caption(" | ".join(meta))
+                meta_text = ""
+                if "timestamp" in message: meta_text += f"🕒 {message['timestamp']}"
+                if "response_time" in message and message["response_time"] > 0: meta_text += f" | ⏱️ {message['response_time']:.2f}s"
                 
+                # Layout: Metadata Text | Pages: [1] [2]
                 if "pages" in message and message["pages"]:
-                    cols = st.columns(len(message["pages"]) + 10)
+                    cols = st.columns([len(meta_text) * 0.8, 0.8] + [0.5] * len(message["pages"]) + [10])
+                    with cols[0]: st.caption(meta_text)
+                    with cols[1]: st.caption("| Pages:")
                     for idx, pg in enumerate(message["pages"]):
-                        if cols[idx].button(str(pg), key=f"msg_{i}_{idx}"):
+                        if cols[idx+2].button(str(pg), key=f"msg_{i}_{idx}"):
                             st.session_state.pdf_page = pg
                             st.session_state.show_right = True
                             st.rerun()
+                elif meta_text:
+                    st.caption(meta_text)
 
     if prompt := st.chat_input("Ask a question about your PDF..."):
         current_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.messages.append({"role": "user", "content": prompt, "timestamp": current_time})
+        
+        # Pre-append assistant message to state to prevent clearing on Stop
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": "", 
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "response_time": 0,
+            "pages": []
+        })
+        current_msg_index = len(st.session_state.messages) - 1
         
         _, col_msg = st.columns([2, 10])
         with col_msg:
@@ -143,7 +168,7 @@ def main():
         with st.chat_message("assistant", avatar="🤖"):
             try:
                 message_placeholder = st.empty()
-                stream_handler = StreamHandler(message_placeholder)
+                stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[current_msg_index])
                 
                 # Placeholder for Stop button
                 stop_placeholder = st.empty()
@@ -168,23 +193,28 @@ def main():
                 # Ensure final text is displayed (handles greetings/non-streaming cases)
                 message_placeholder.markdown(answer_text)
 
-                current_time = datetime.now().strftime("%H:%M:%S")
+                # Update final metadata in session state
+                st.session_state.messages[current_msg_index]["content"] = answer_text
+                st.session_state.messages[current_msg_index]["response_time"] = time_taken
+                st.session_state.messages[current_msg_index]["pages"] = pages
                 
                 # Inline Metadata
-                meta = [f"🕒 {current_time}"]
-                if time_taken > 0: meta.append(f"⏱️ {time_taken:.2f}s")
-                st.caption(" | ".join(meta))
+                meta_text = f"🕒 {st.session_state.messages[current_msg_index]['timestamp']}"
+                if time_taken > 0: meta_text += f" | ⏱️ {time_taken:.2f}s"
                 
+                # Layout for new message
                 if pages:
-                    cols = st.columns(len(pages) + 10)
+                    cols = st.columns([len(meta_text) * 0.8, 0.8] + [0.5] * len(pages) + [10])
+                    with cols[0]: st.caption(meta_text)
+                    with cols[1]: st.caption("| Pages:")
                     for idx, pg in enumerate(pages):
-                        if cols[idx].button(str(pg), key=f"curr_{idx}"):
+                        if cols[idx+2].button(str(pg), key=f"curr_{idx}"):
                             st.session_state.pdf_page = pg
                             st.session_state.show_right = True
                             st.rerun()
-
-                st.session_state.messages.append({"role": "assistant", "content": answer_text, "response_time": time_taken, "pages": pages, "timestamp": current_time})
-                st.rerun()
+                else:
+                    st.caption(meta_text)
+                
             except Exception as e:
                 st.error(f"Error generating response: {e}")
 
