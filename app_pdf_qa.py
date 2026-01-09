@@ -51,7 +51,7 @@ def main():
         padding: 2px 8px;
     }
     /* Stop button styling - Floating square button */
-    div:has(> span#stop-btn-anchor) + div button {
+    div:has(span#stop-btn-anchor) + div button {
         position: fixed !important;
         bottom: 18px !important;
         right: 20px !important;
@@ -69,10 +69,10 @@ def main():
         box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important;
         transition: background-color 0.2s;
     }
-    div:has(> span#stop-btn-anchor) + div button:hover {
+    div:has(span#stop-btn-anchor) + div button:hover {
         background-color: #ff3333 !important;
     }
-    div:has(> span#stop-btn-anchor) + div button:active {
+    div:has(span#stop-btn-anchor) + div button:active {
         background-color: #cc0000 !important;
     }
     </style>
@@ -134,11 +134,12 @@ def main():
                 
                 # Layout: Metadata Text | Pages: [1] [2]
                 if "pages" in message and message["pages"]:
-                    cols = st.columns([len(meta_text) * 0.8, 0.8] + [0.5] * len(message["pages"]) + [10])
-                    with cols[0]: st.caption(meta_text)
-                    with cols[1]: st.caption("| Pages:")
+                    # Fixed ratio layout: Text(4) | Btn(0.5)... | Spacer(5)
+                    cols = st.columns([4] + [0.5] * len(message["pages"]) + [5])
+                    with cols[0]: 
+                        st.caption(meta_text + " | Pages:")
                     for idx, pg in enumerate(message["pages"]):
-                        if cols[idx+2].button(str(pg), key=f"msg_{i}_{idx}"):
+                        if cols[idx+1].button(str(pg), key=f"msg_{i}_{idx}"):
                             st.session_state.pdf_page = pg
                             st.session_state.show_right = True
                             st.rerun()
@@ -204,11 +205,11 @@ def main():
                 
                 # Layout for new message
                 if pages:
-                    cols = st.columns([len(meta_text) * 0.8, 0.8] + [0.5] * len(pages) + [10])
-                    with cols[0]: st.caption(meta_text)
-                    with cols[1]: st.caption("| Pages:")
+                    cols = st.columns([4] + [0.5] * len(pages) + [5])
+                    with cols[0]: 
+                        st.caption(meta_text + " | Pages:")
                     for idx, pg in enumerate(pages):
-                        if cols[idx+2].button(str(pg), key=f"curr_{idx}"):
+                        if cols[idx+1].button(str(pg), key=f"curr_{idx}"):
                             st.session_state.pdf_page = pg
                             st.session_state.show_right = True
                             st.rerun()
