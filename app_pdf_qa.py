@@ -33,6 +33,11 @@ def main():
     /* Style for inline metadata */
     .stCaption {
         display: inline-block;
+        font-family: monospace;
+        color: #666;
+        background-color: rgba(0,0,0,0.05);
+        padding: 2px 6px;
+        border-radius: 4px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -77,32 +82,48 @@ def main():
 
     # Chat Interface
     for message in st.session_state.messages:
-        avatar = "🤖" if message["role"] == "assistant" else "👤"
-        with st.chat_message(message["role"], avatar=avatar):
-            st.markdown(message["content"])
-            
-            # Inline Metadata
-            meta = []
-            if "timestamp" in message: meta.append(f"🕒 {message['timestamp']}")
-            if "response_time" in message and message["response_time"] > 0: meta.append(f"⏱️ {message['response_time']:.2f}s")
-            if "pages" in message and message["pages"]: meta.append(f"📄 Pages: {', '.join(map(str, message['pages']))}")
-            if meta: st.caption(" | ".join(meta))
+        if message["role"] == "user":
+            _, col_msg = st.columns([2, 10])
+            with col_msg:
+                with st.chat_message("user", avatar="👤"):
+                    st.markdown(message["content"])
+                    if "timestamp" in message: st.caption(f"🕒 {message['timestamp']}")
+        else:
+            with st.chat_message("assistant", avatar="🤖"):
+                st.markdown(message["content"])
+                # Inline Metadata
+                meta = []
+                if "timestamp" in message: meta.append(f"🕒 {message['timestamp']}")
+                if "response_time" in message and message["response_time"] > 0: meta.append(f"⏱️ {message['response_time']:.2f}s")
+                if "pages" in message and message["pages"]: meta.append(f"📄 Pages: {', '.join(map(str, message['pages']))}")
+                if meta: st.caption(" | ".join(meta))
 
     if prompt := st.chat_input("Ask a question about your PDF..."):
         current_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.messages.append({"role": "user", "content": prompt, "timestamp": current_time})
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(prompt)
-            st.caption(f"🕒 Sent: {current_time}")
+        
+        _, col_msg = st.columns([2, 10])
+        with col_msg:
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(prompt)
+                st.caption(f"🕒 {current_time}")
 
         with st.chat_message("assistant", avatar="🤖"):
             try:
                 message_placeholder = st.empty()
                 stream_handler = StreamHandler(message_placeholder)
+                
+                # Placeholder for Stop button
+                stop_placeholder = st.empty()
+                with stop_placeholder:
+                    st.button("⏹ Stop", key="stop_gen")
 
                 # Show thinking indicator only for initial retrieval
                 with st.spinner("Retrieving relevant context..."):
                     response = st.session_state.engine.answer_question(prompt, callbacks=[stream_handler])
+                
+                # Clear stop button after response is complete
+                stop_placeholder.empty()
 
                 # Parse response
                 answer_text = response["result"]
