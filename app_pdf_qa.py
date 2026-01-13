@@ -6,7 +6,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from pdf_qa_engine import PDFQAEngine
 from model_config import MODEL_CONFIG
 
-st.set_page_config(page_title="Chat with PDF", layout="wide")
+st.set_page_config(page_title="TMI AI Assistant", layout="wide")
 
 class StreamHandler(BaseCallbackHandler):
     def __init__(self, container, initial_text="", message_context=None):
@@ -35,7 +35,7 @@ class StreamHandler(BaseCallbackHandler):
             self.message_context["content"] = self.text
 
 def main():
-    st.title("📄 Chat with PDF")
+    st.title("📄 TMI AI Assistant")
     
     # Custom CSS for chat styling
     st.markdown("""
