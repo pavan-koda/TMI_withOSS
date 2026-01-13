@@ -213,7 +213,11 @@ def main():
                 if "timestamp" in message:
                     meta_text += f"🕒 {message['timestamp']}"
                 if "response_time" in message and message["response_time"] > 0:
-                    meta_text += f" | ⏱️ {message['response_time']:.2f}s"
+                    rt = message["response_time"]
+                    if rt >= 60:
+                        meta_text += f" | ⏱️ {int(rt // 60)}m {int(rt % 60)}s"
+                    else:
+                        meta_text += f" | ⏱️ {rt:.2f}s"
 
                 # Layout: Metadata Text | Pages: [1] [2]
                 if "pages" in message and message["pages"]:
