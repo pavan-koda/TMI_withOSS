@@ -14,7 +14,7 @@ class StreamHandler(BaseCallbackHandler):
         self.text = initial_text
         self.token_count = 0
         self.message_context = message_context
-        self.update_interval = 3
+        self.update_interval = 1
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.text += token
@@ -105,7 +105,7 @@ def render_chat_page():
                         source = os.path.basename(metadata.get("source", "Unknown"))
                         st.markdown(f"- **Page {page}** ({source})")
 
-    if prompt := st.chat_input("Ask a question about your PDF..."):
+    if prompt := st.chat_input("Ask a question about your PDF...", max_chars=2000):
         if not st.session_state.get("current_file"):
             st.warning("Please select a PDF before asking questions.")
             return

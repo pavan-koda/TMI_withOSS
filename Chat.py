@@ -13,7 +13,7 @@ class StreamHandler(BaseCallbackHandler):
         self.text = initial_text
         self.token_count = 0
         self.message_context = message_context
-        self.update_interval = 3  # Update UI every N tokens for better performance
+        self.update_interval = 1  # Update UI every N tokens for better performance
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.text += token
@@ -187,7 +187,7 @@ def render_chat_page():
                         source = os.path.basename(metadata.get("source", "Unknown"))
                         st.markdown(f"- **Page {page}** ({source})")
 
-    if prompt := st.chat_input(f"Ask a question about {active_pdf_name}..."):
+    if prompt := st.chat_input(f"Ask a question about {active_pdf_name}...", max_chars=2000):
         current_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.messages[active_pdf_name].append({"role": "user", "content": prompt, "timestamp": current_time})
         
