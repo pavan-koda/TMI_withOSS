@@ -56,7 +56,7 @@ def render_chat_page():
         if not os.path.exists("uploads"):
             os.makedirs("uploads")
             
-        pdf_files = ["No PDF selected"] + [f for f in os.listdir("uploads") if f.endswith(".pdf")]
+        pdf_files = ["No PDF selected", "Select All"] + [f for f in os.listdir("uploads") if f.endswith(".pdf")]
         selected_pdf = st.selectbox("Choose a PDF to chat with", options=pdf_files)
 
         if selected_pdf != "No PDF selected":
@@ -114,29 +114,50 @@ def render_chat_page():
             st.caption(f"🕒 {current_time}")
 
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            response_metadata = {}
+            col1, col2 = st.columns([0.9, 0.1])
+            with col1:
+                message_placeholder = st.empty()
+            with col2:
+                stop_placeholder = st.empty()
+            
+            if stop_placeholder.button("⏹️", key=f"stop_{current_time}", help="Stop generation"):
+                st.stop()
+
+            # Pre-append message to history so it persists if stopped
+            st.session_state.messages.append({"role": "assistant", "content": "", "timestamp": current_time})
+            current_msg_index = len(st.session_state.messages) - 1
+            
             try:
-                stream_handler = StreamHandler(message_placeholder)
-                pdf_path = os.path.join("uploads", st.session_state.current_file)
+                stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[current_msg_index])
+                message_placeholder.markdown("Thinking...")
+                
+                if st.session_state.current_file == "Select All":
+                    pdf_path = "ALL_PDFS"
+                else:
+                    pdf_path = os.path.join("uploads", st.session_state.current_file)
+
                 response = st.session_state.engine.answer_question(
                     prompt, 
                     pdf_file_path=pdf_path, 
                     callbacks=[stream_handler]
                 )
-                full_response = response.get("result", "No response from model.")
-                response_metadata["response_time"] = response.get("response_time", 0)
-                response_metadata["source_documents"] = response.get("source_documents", [])
+                
+                stop_placeholder.empty()
+                full_response = response.get("result", "")
+                
+                # Update final state
+                st.session_state.messages[current_msg_index]["content"] = full_response
+                st.session_state.messages[current_msg_index]["response_time"] = response.get("response_time", 0)
+                st.session_state.messages[current_msg_index]["source_documents"] = response.get("source_documents", [])
                 
                 message_placeholder.markdown(full_response)
                 
                 # Show metadata immediately
-                st.caption(f"🕒 {current_time} | ⏱️ {format_duration(response_metadata['response_time'])}")
+                st.caption(f"🕒 {current_time} | ⏱️ {format_duration(response['response_time'])}")
                 
-                if response_metadata["source_documents"]:
+                if response["source_documents"]:
                     with st.expander("📚 Reference Pages"):
-                        for doc in response_metadata["source_documents"]:
+                        for doc in response["source_documents"]:
                             metadata = doc.metadata if hasattr(doc, "metadata") else {}
                             page = metadata.get("page", "Unknown")
                             if isinstance(page, int): page += 1
@@ -145,15 +166,6 @@ def render_chat_page():
                             
             except Exception as e:
                 st.error(f"⚠️ Error: {str(e)}")
-        
-        # Save to history
-        msg_data = {
-            "role": "assistant", 
-            "content": full_response, 
-            "timestamp": current_time
-        }
-        msg_data.update(response_metadata)
-        st.session_state.messages.append(msg_data)
 
 def main():
     if "page" not in st.session_state:

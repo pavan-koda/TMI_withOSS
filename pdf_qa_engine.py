@@ -44,15 +44,34 @@ class PDFQAEngine:
         logger.info(f"Vector store saved to {vector_store_path}")
 
     def _get_qa_chain(self, pdf_file_path):
-        vector_store_path = self._get_vector_store_path(pdf_file_path)
-        pdf_filename = os.path.basename(pdf_file_path)
+        vector_store = None
 
-        if pdf_filename in self._vector_store_cache:
-            vector_store = self._vector_store_cache[pdf_filename]
-        elif os.path.exists(vector_store_path):
-            vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
-            self._vector_store_cache[pdf_filename] = vector_store
+        if pdf_file_path == "ALL_PDFS":
+            vector_stores = []
+            if os.path.exists(VECTOR_STORE_DIR):
+                for filename in os.listdir(VECTOR_STORE_DIR):
+                    if filename.endswith(".faiss"):
+                        try:
+                            vs = FAISS.load_local(os.path.join(VECTOR_STORE_DIR, filename), self.embeddings, allow_dangerous_deserialization=True)
+                            vector_stores.append(vs)
+                        except Exception as e:
+                            logger.error(f"Error loading {filename}: {e}")
+            
+            if vector_stores:
+                vector_store = vector_stores[0]
+                for vs in vector_stores[1:]:
+                    vector_store.merge_from(vs)
         else:
+            vector_store_path = self._get_vector_store_path(pdf_file_path)
+            pdf_filename = os.path.basename(pdf_file_path)
+
+            if pdf_filename in self._vector_store_cache:
+                vector_store = self._vector_store_cache[pdf_filename]
+            elif os.path.exists(vector_store_path):
+                vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
+                self._vector_store_cache[pdf_filename] = vector_store
+
+        if not vector_store:
             return None
 
         retriever = vector_store.as_retriever(search_kwargs={"k": 4})

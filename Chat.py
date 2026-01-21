@@ -137,14 +137,17 @@ def render_chat_page():
             st.rerun()
         st.stop()
 
+    # Add Select All option
+    pdf_options = ["Select All"] + uploaded_pdf_files
+
     # If there's a previously active PDF, try to keep it, otherwise default to the first one
-    if "active_pdf" not in st.session_state or st.session_state.active_pdf not in uploaded_pdf_files:
-        st.session_state.active_pdf = uploaded_pdf_files[0]
+    if "active_pdf" not in st.session_state or st.session_state.active_pdf not in pdf_options:
+        st.session_state.active_pdf = pdf_options[0]
         
     st.session_state.active_pdf = st.selectbox(
         "Select a PDF to chat with:",
-        uploaded_pdf_files,
-        index=uploaded_pdf_files.index(st.session_state.active_pdf)
+        pdf_options,
+        index=pdf_options.index(st.session_state.active_pdf)
     )
     
     active_pdf_name = st.session_state.active_pdf
@@ -205,7 +208,13 @@ def render_chat_page():
             try:
                 stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[active_pdf_name][current_msg_index])
                 
-                pdf_path = os.path.join("uploads", active_pdf_name)
+                message_placeholder.markdown("Thinking...")
+
+                if active_pdf_name == "Select All":
+                    pdf_path = "ALL_PDFS"
+                else:
+                    pdf_path = os.path.join("uploads", active_pdf_name)
+
                 response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler])
                 
                 stop_placeholder.empty()
