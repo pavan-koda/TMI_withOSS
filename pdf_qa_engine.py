@@ -60,7 +60,7 @@ class PDFQAEngine:
             vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
             
             if not os.path.exists(vision_meta_path):
-                logger.info(f"Ingesting PDF (Vision): {pdf_file_path}")
+                logger.info(f"Ingesting PDF (Vision Mode - ColPali): {pdf_file_path}")
                 if not self.pdf_processor:
                     self.pdf_processor = PDFProcessor()
                 
@@ -175,6 +175,7 @@ class PDFQAEngine:
                 logger.warning(f"Vision index not found for {pdf_filename}. Skipping vision search.")
 
             if results:
+                logger.info(f"Vision Mode: Found {len(results)} relevant pages using ColPali.")
                 # We found relevant pages visually. Now we need to get the text from those pages 
                 # to feed into the LLM (since Mistral is text-based).
                 context_text = ""
@@ -223,6 +224,7 @@ class PDFQAEngine:
         if not result_text:
             qa_chain = self._get_qa_chain(pdf_file_path)
             if qa_chain:
+                logger.info(f"Standard Mode: Using Text RAG for faster response.")
                 # Combine history and question to provide context to the model
                 full_query = f"Chat History:\n{history_text}\n\nQuestion: {question}"
                 response = qa_chain.invoke({"query": full_query}, config={"callbacks": callbacks})

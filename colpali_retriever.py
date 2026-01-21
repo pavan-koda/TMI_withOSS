@@ -65,7 +65,10 @@ class ColPaliRetriever:
             ).to(self.device)
 
             self.model.eval()
-            logger.info("ColPali model loaded successfully")
+            param_count = sum(p.numel() for p in self.model.parameters())
+            model_size = sum(p.numel() * p.element_size() for p in self.model.parameters())
+            model_size_gb = model_size / (1024**3)
+            logger.info(f"ColPali model loaded successfully. Parameters: {param_count:,} | Size: {model_size_gb:.2f} GB")
 
         except ImportError:
             logger.warning("ColPali not installed. Using fallback CLIP-based retriever")
