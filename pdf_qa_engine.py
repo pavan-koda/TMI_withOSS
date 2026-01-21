@@ -105,16 +105,19 @@ class PDFQAEngine:
 
         retriever = vector_store.as_retriever(search_kwargs={"k": 4})
         
-        prompt_template = """Use the following pieces of context to answer the question at the end. 
+        prompt_template = """Use the following pieces of context and the chat history to answer the question at the end. 
         If you don't know the answer, just say that you don't know, don't try to make up an answer.
         
         Context: {context}
+        
+        Chat History:
+        {chat_history}
         
         Question: {question}
         Answer:"""
         
         PROMPT = PromptTemplate(
-            template=prompt_template, input_variables=["context", "question"]
+            template=prompt_template, input_variables=["context", "question", "chat_history"]
         )
         
         return RetrievalQA.from_chain_type(
@@ -130,7 +133,7 @@ class PDFQAEngine:
         text = text.lower().strip(" .!,")
         return text in greetings
 
-    def answer_question(self, question, pdf_file_path, callbacks=None, use_vision=False):
+    def answer_question(self, question, pdf_file_path, callbacks=None, use_vision=False, chat_history=None):
         start_time = time.time()
         
         if self._is_greeting(question):
@@ -139,6 +142,16 @@ class PDFQAEngine:
                 "response_time": 0.0,
                 "source_documents": []
             }
+
+        if chat_history is None:
+            chat_history = []
+            
+        history_text = ""
+        for msg in chat_history:
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+            if role and content:
+                history_text += f"{role}: {content}\n"
 
         result_text = ""
         source_docs = []
@@ -170,7 +183,7 @@ class PDFQAEngine:
 
                 # Prompt the LLM with the visual context info
                 # (In a full VLM setup, we would pass the image, but here we pass the page reference)
-                prompt = f"I found these pages visually relevant to the question: {question}\n\nContext:\n{context_text}\n\nPlease answer the question based on the document content found on these pages."
+                prompt = f"Chat History:\n{history_text}\n\nI found these pages visually relevant to the question: {question}\n\nContext:\n{context_text}\n\nPlease answer the question based on the document content found on these pages."
                 
                 response_text = self.llm.invoke(prompt, config={"callbacks": callbacks})
                 result_text = response_text.content if hasattr(response_text, "content") else str(response_text)
@@ -182,7 +195,7 @@ class PDFQAEngine:
         if not result_text:
             qa_chain = self._get_qa_chain(pdf_file_path)
             if qa_chain:
-                response = qa_chain.invoke({"query": question}, config={"callbacks": callbacks})
+                response = qa_chain.invoke({"query": question, "chat_history": history_text}, config={"callbacks": callbacks})
                 result_text = response["result"]
                 source_docs = response.get("source_documents", [])
             else:

@@ -139,11 +139,15 @@ def render_chat_page():
                 else:
                     pdf_path = os.path.join("uploads", st.session_state.current_file)
 
+                # Get chat history (excluding current question and empty assistant placeholder)
+                history = st.session_state.messages[:-2]
+
                 response = st.session_state.engine.answer_question(
                     prompt, 
                     pdf_file_path=pdf_path, 
                     callbacks=[stream_handler],
-                    use_vision=use_vision
+                    use_vision=use_vision,
+                    chat_history=history
                 )
                 
                 stop_placeholder.empty()

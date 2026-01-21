@@ -218,7 +218,10 @@ def render_chat_page():
                 else:
                     pdf_path = os.path.join("uploads", active_pdf_name)
 
-                response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler], use_vision=use_vision)
+                # Get chat history (excluding current question and empty assistant placeholder)
+                history = st.session_state.messages[active_pdf_name][:-2]
+
+                response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler], use_vision=use_vision, chat_history=history)
                 
                 stop_placeholder.empty()
                 st.session_state.messages[active_pdf_name][current_msg_index]["content"] = response["result"]
