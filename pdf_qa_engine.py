@@ -185,9 +185,15 @@ class PDFQAEngine:
                     doc = None
 
                 for res in results:
-                    page_num = res['page'] # 1-based
-                    page_content = doc[page_num-1].get_text() if doc and 0 <= page_num-1 < len(doc) else ""
-                    if not page_content.strip():
+                    page_num = int(res['page']) # Ensure standard int
+                    page_content = ""
+                    try:
+                        if doc and 0 <= page_num-1 < len(doc):
+                            page_content = doc[page_num-1].get_text()
+                    except Exception as e:
+                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
+
+                    if not page_content or not page_content.strip():
                         page_content = "[Visual Content Only - No Text Extracted. This page may contain only images or charts without selectable text.]"
                     context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n{page_content}\n"
                     source_docs.append(MockDoc(page_num, pdf_filename))
