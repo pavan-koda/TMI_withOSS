@@ -32,14 +32,18 @@ class StreamHandler(BaseCallbackHandler):
 def render_chat_page():
     st.title("📄 TMI AI Assistant")
 
-    # ... (CSS styles remain the same) ...
-
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "engine" not in st.session_state:
         st.session_state.engine = PDFQAEngine(model_name=MODEL_CONFIG["model_name"], base_url=MODEL_CONFIG["base_url"])
 
     with st.sidebar:
+        st.header("Controls")
+        if st.button("Go to Admin/Upload Page"):
+            st.session_state.page = "upload"
+            st.rerun()
+
+        st.markdown("---")
         st.header("Select PDF")
         
         if not os.path.exists("uploads"):
@@ -50,15 +54,12 @@ def render_chat_page():
 
         if selected_pdf != "No PDF selected":
             if "current_file" not in st.session_state or st.session_state.current_file != selected_pdf:
-                with st.spinner(f"Processing {selected_pdf}..."):
-                    pdf_path = os.path.join("uploads", selected_pdf)
-                    try:
-                        st.session_state.engine.ingest_pdf(pdf_path)
-                        st.session_state.current_file = selected_pdf
-                        st.session_state.messages = []
-                        st.success("PDF Processed Successfully!")
-                    except Exception as e:
-                        st.error(f"Error processing PDF: {e}")
+                st.session_state.current_file = selected_pdf
+                st.session_state.messages = []
+                st.success(f"Selected {selected_pdf}")
+        else:
+            st.session_state.current_file = None
+
 
         st.markdown("---")
         st.markdown("### Model Config")
@@ -71,34 +72,34 @@ def render_chat_page():
                 st.session_state.messages = []
                 st.rerun()
 
-    # ... (Chat message display loop remains the same) ...
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
     if prompt := st.chat_input("Ask a question about your PDF..."):
-        if "current_file" not in st.session_state or st.session_state.current_file == "No PDF selected":
+        if not st.session_state.get("current_file"):
             st.warning("Please select a PDF before asking questions.")
             return
             
-        current_time = datetime.now().strftime("%H:%M:%S")
-        st.session_state.messages.append({"role": "user", "content": prompt, "timestamp": current_time})
-        st.session_state.messages.append({"role": "assistant", "content": "", "timestamp": datetime.now().strftime("%H:%M:%S"), "response_time": 0, "pages": []})
-        st.rerun()
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant" and st.session_state.messages[-1]["content"] == "":
-        # ... (Response generation logic remains the same, but with st.rerun()) ...
-        try:
-            # ...
-            st.rerun()
-        except Exception as e:
-            st.error(f"⚠️ Error: {str(e)}")
-
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
+            try:
+                stream_handler = StreamHandler(message_placeholder)
+                response = st.session_state.engine.answer_question(prompt, callbacks=[stream_handler])
+                full_response = response.get("result", "No response from model.")
+                message_placeholder.markdown(full_response)
+            except Exception as e:
+                st.error(f"⚠️ Error: {str(e)}")
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 def main():
     if "page" not in st.session_state:
-        # If uploads dir is empty or doesn't exist, go to upload page
-        if not os.path.exists("uploads") or not any(f.endswith(".pdf") for f in os.listdir("uploads")):
-            st.session_state.page = "upload"
-        else:
-            st.session_state.page = "chat"
+        st.session_state.page = "chat"
 
     if st.session_state.page == "chat":
         render_chat_page()
