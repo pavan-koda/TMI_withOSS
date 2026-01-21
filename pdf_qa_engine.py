@@ -57,7 +57,7 @@ class PDFQAEngine:
             if not os.path.exists(vision_meta_path):
                 logger.info(f"Ingesting PDF (Vision): {pdf_file_path}")
                 if not self.pdf_processor:
-                    self.pdf_processor = PDFProcessor(output_dir=os.path.join("uploads", "processed"))
+                    self.pdf_processor = PDFProcessor()
                 
                 # Process PDF to images
                 processed_data = self.pdf_processor.process_pdf(pdf_file_path, os.path.join("uploads", "processed", pdf_filename))
@@ -187,6 +187,8 @@ class PDFQAEngine:
                 for res in results:
                     page_num = res['page'] # 1-based
                     page_content = doc[page_num-1].get_text() if doc and 0 <= page_num-1 < len(doc) else ""
+                    if not page_content.strip():
+                        page_content = "[Visual Content Only - No Text Extracted. This page may contain only images or charts without selectable text.]"
                     context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n{page_content}\n"
                     source_docs.append(MockDoc(page_num, pdf_filename))
                 
