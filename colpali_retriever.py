@@ -13,6 +13,15 @@ import torch
 from PIL import Image
 import pickle
 
+# Patch for transformers compatibility with older torch versions
+# Fixes: AttributeError: module 'torch.compiler' has no attribute 'is_compiling'
+if hasattr(torch, "compiler") and not hasattr(torch.compiler, "is_compiling"):
+    torch.compiler.is_compiling = lambda: False
+elif not hasattr(torch, "compiler"):
+    class MockCompiler:
+        def is_compiling(self): return False
+    torch.compiler = MockCompiler()
+
 logger = logging.getLogger(__name__)
 
 

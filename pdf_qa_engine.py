@@ -202,7 +202,7 @@ class PDFQAEngine:
                         logger.warning(f"Failed to extract text from page {page_num}: {e}")
 
                     if not page_content or not page_content.strip():
-                        page_content = "[Visual Content Only - No Text Extracted. This page may contain only images or charts without selectable text.]"
+                        page_content = "[Visual Content Only - No Text Extracted. This page appears to be an image or scan. I found it visually relevant, but I cannot read the text content directly.]"
                     context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n{page_content}\n"
                     source_docs.append(MockDoc(page_num, pdf_filename))
                 
