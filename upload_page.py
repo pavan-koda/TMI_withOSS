@@ -1,10 +1,10 @@
 import streamlit as st
 import os
+import time
 
 def render_upload_page():
     st.header("Upload PDFs")
     
-    # Create the uploads directory if it doesn't exist
     if not os.path.exists("uploads"):
         os.makedirs("uploads")
         
@@ -12,11 +12,9 @@ def render_upload_page():
     
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            # Save the file to the uploads directory
             with open(os.path.join("uploads", uploaded_file.name), "wb") as f:
                 f.write(uploaded_file.getbuffer())
-        st.success(f"{len(uploaded_files)} PDF(s) uploaded successfully!")
-        
-    if st.button("Go to Chat"):
+        st.success(f"{len(uploaded_files)} PDF(s) uploaded successfully! Redirecting to chat...")
+        time.sleep(1)
         st.session_state.page = "chat"
-        st.experimental_rerun()
+        st.rerun()
