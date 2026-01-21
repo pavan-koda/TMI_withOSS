@@ -35,7 +35,7 @@ def format_duration(seconds):
         minutes = int(seconds // 60)
         remaining_seconds = int(seconds % 60)
         return f"{minutes}m {remaining_seconds}s"
-    return f"{seconds:.2f}s"
+    return f"{seconds:.2f} sec"
 
 def render_chat_page():
     st.markdown("""
@@ -190,7 +190,14 @@ def render_chat_page():
             st.caption(f"🕒 {current_time}")
 
         with st.chat_message("assistant", avatar="🤖"):
-            message_placeholder = st.empty()
+            col1, col2 = st.columns([0.9, 0.1])
+            with col1:
+                message_placeholder = st.empty()
+            with col2:
+                stop_placeholder = st.empty()
+            
+            if stop_placeholder.button("⏹️", key=f"stop_{current_time}", help="Stop generation"):
+                st.stop()
             
             st.session_state.messages[active_pdf_name].append({"role": "assistant", "content": "", "timestamp": current_time})
             current_msg_index = len(st.session_state.messages[active_pdf_name]) - 1
@@ -198,10 +205,10 @@ def render_chat_page():
             try:
                 stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[active_pdf_name][current_msg_index])
                 
-                with st.spinner("Thinking..."):
-                    pdf_path = os.path.join("uploads", active_pdf_name)
-                    response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler])
+                pdf_path = os.path.join("uploads", active_pdf_name)
+                response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler])
                 
+                stop_placeholder.empty()
                 st.session_state.messages[active_pdf_name][current_msg_index]["content"] = response["result"]
                 st.session_state.messages[active_pdf_name][current_msg_index]["response_time"] = response["response_time"]
                 st.session_state.messages[active_pdf_name][current_msg_index]["source_documents"] = response["source_documents"]
