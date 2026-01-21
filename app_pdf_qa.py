@@ -89,9 +89,6 @@ def render_chat_page():
         st.info(f"**Model:** {MODEL_CONFIG['model_name']}")
         st.info(f"**Backend:** Ollama")
         
-        # Vision Toggle
-        use_vision = st.toggle("Enable Vision Mode (ColPali)", value=False, help="Use this for PDFs with tables, charts, or images.")
-
         if st.session_state.messages:
             st.markdown("---")
             if st.button("🗑️ Clear Chat", use_container_width=True):
@@ -162,7 +159,6 @@ def render_chat_page():
                     prompt, 
                     pdf_file_path=pdf_path, 
                     callbacks=[stream_handler],
-                    use_vision=use_vision,
                     chat_history=history
                 )
                 
@@ -186,19 +182,4 @@ def render_chat_page():
                             page = metadata.get("page", "Unknown")
                             if isinstance(page, int): page += 1
                             source = os.path.basename(metadata.get("source", "Unknown"))
-                            st.markdown(f"- **Page {page}** ({source})")
-                            
-            except Exception as e:
-                st.error(f"⚠️ Error: {str(e)}")
-
-def main():
-    if "page" not in st.session_state:
-        st.session_state.page = "chat"
-
-    if st.session_state.page == "chat":
-        render_chat_page()
-    elif st.session_state.page == "upload":
-        render_upload_page()
-
-if __name__ == "__main__":
-    main()
+                            st.markdown(f"-

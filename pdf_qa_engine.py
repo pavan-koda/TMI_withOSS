@@ -10,9 +10,6 @@ import logging
 import time
 import os
 import shutil
-from colpali_retriever import ColPaliRetriever
-from pdf_processor import PDFProcessor
-import fitz
 
 logger = logging.getLogger(__name__)
 
@@ -52,31 +49,6 @@ class PDFQAEngine:
             vector_store = FAISS.from_documents(chunks, self.embeddings)
             vector_store.save_local(vector_store_path)
             logger.info(f"Vector store saved to {vector_store_path}")
-
-        # 2. Vision Ingestion (Optional - Slower but handles tables/images)
-        if use_vision:
-            pdf_filename = os.path.basename(pdf_file_path)
-            # We use a different naming convention for vision indices
-            vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
-            
-            if not os.path.exists(vision_meta_path):
-                logger.info(f"Ingesting PDF (Vision Mode - ColPali): {pdf_file_path}")
-                if not self.pdf_processor:
-                    self.pdf_processor = PDFProcessor()
-                
-                # Process PDF to images
-                processed_data = self.pdf_processor.process_pdf(pdf_file_path, os.path.join("uploads", "processed", pdf_filename))
-                
-                if processed_data:
-                    if not self.vision_retriever:
-                        self.vision_retriever = ColPaliRetriever()
-                    
-                    # Create Index
-                    self.vision_retriever.create_index(
-                        page_images=processed_data['page_images'],
-                        session_id=pdf_filename,
-                        data_dir=VECTOR_STORE_DIR
-                    )
 
     def _get_qa_chain(self, pdf_file_path):
         vector_store = None
@@ -136,7 +108,7 @@ class PDFQAEngine:
         text = text.lower().strip(" .!,")
         return text in greetings
 
-    def answer_question(self, question, pdf_file_path, callbacks=None, use_vision=False, chat_history=None):
+    def answer_question(self, question, pdf_file_path, callbacks=None, chat_history=None):
         start_time = time.time()
         
         if self._is_greeting(question):
@@ -146,134 +118,19 @@ class PDFQAEngine:
                 "source_documents": []
             }
 
-        if chat_history is None:
-            chat_history = []
-            
-        history_text = ""
-        for msg in chat_history:
-            role = msg.get("role", "").capitalize()
-            content = msg.get("content", "")
-            if role and content:
-                history_text += f"{role}: {content}\n"
+        qa_chain = self._get_qa_chain(pdf_file_path)
+        if not qa_chain:
+            return {
+                "result": "I cannot find the document index. Please upload the PDF again.",
+                "response_time": 0.0,
+                "source_documents": []
+            }
 
-        result_text = ""
-        source_docs = []
-
-        # --- VISION MODE ---
-        if use_vision and pdf_file_path != "ALL_PDFS":
-            pdf_filename = os.path.basename(pdf_file_path)
-            
-            results = []
-            vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
-            
-            if os.path.exists(vision_meta_path):
-                if not self.vision_retriever:
-                    self.vision_retriever = ColPaliRetriever()
-                # Search using Vision (Finds the page image that looks like the answer)
-                results = self.vision_retriever.search(question, session_id=pdf_filename, data_dir=VECTOR_STORE_DIR, top_k=3)
-            else:
-                logger.warning(f"Vision index not found for {pdf_filename}. Skipping vision search.")
-
-            if results:
-                logger.info(f"Vision Mode: Found {len(results)} relevant pages using ColPali.")
-                # We found relevant pages visually. Now we need to get the text from those pages 
-                # to feed into the LLM (since Mistral is text-based).
-                context_text = ""
-                
-                # Mocking document objects for the UI to display
-                class MockDoc:
-                    def __init__(self, page, source):
-                        self.metadata = {"page": page-1, "source": source}
-                        self.page_content = ""
-
-                # Open PDF to extract text from identified pages
-                try:
-                    doc = fitz.open(pdf_file_path)
-                except Exception as e:
-                    logger.error(f"Error opening PDF for vision context: {e}")
-                    doc = None
-
-                for res in results:
-                    page_num = int(res['page']) # Ensure standard int
-                    page_content = ""
-                    try:
-                        if doc and 0 <= page_num-1 < len(doc):
-                            page_content = doc[page_num-1].get_text()
-                    except Exception as e:
-                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
-
-                    if not page_content or not page_content.strip():
-                        page_content = "[Visual Content Only - No Text Extracted. This page appears to be an image or scan. I found it visually relevant, but I cannot read the text content directly.]"
-                    context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n{page_content}\n"
-                    source_docs.append(MockDoc(page_num, pdf_filename))
-                
-                if doc:
-                    doc.close()
-
-                # Integrate Text-based RAG results (Hybrid Search)
-                # This ensures we answer text-based questions accurately even in Vision Mode
-                vector_store_path = self._get_vector_store_path(pdf_file_path)
-                vector_store = None
-                
-                if pdf_filename in self._vector_store_cache:
-                    vector_store = self._vector_store_cache[pdf_filename]
-                elif os.path.exists(vector_store_path):
-                    try:
-                        vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
-                        self._vector_store_cache[pdf_filename] = vector_store
-                    except Exception as e:
-                        logger.error(f"Error loading vector store for hybrid search: {e}")
-
-                if vector_store:
-                    try:
-                        text_retriever = vector_store.as_retriever(search_kwargs={"k": 2})
-                        text_docs = text_retriever.invoke(question)
-                        if text_docs:
-                            context_text += "\n--- Relevant Text Segments ---\n"
-                            for doc in text_docs:
-                                context_text += f"\n{doc.page_content}\n"
-                                source_docs.append(doc)
-                    except Exception as e:
-                        logger.warning(f"Text retrieval failed in vision mode: {e}")
-
-                # Prompt the LLM with the visual context info
-                # (In a full VLM setup, we would pass the image, but here we pass the page reference)
-                prompt = f"Chat History:\n{history_text}\n\nI found these pages relevant to the question: {question}\n\nContext:\n{context_text}\n\nPlease answer the question based on the document content found on these pages."
-                
-                response_text = self.llm.invoke(prompt, config={"callbacks": callbacks})
-                result_text = response_text.content if hasattr(response_text, "content") else str(response_text)
-            else:
-                # If vision fails, fall back to text
-                pass
-
-        # --- STANDARD TEXT MODE (Default or Fallback) ---
-        if not result_text:
-            qa_chain = self._get_qa_chain(pdf_file_path)
-            if qa_chain:
-                logger.info(f"Standard Mode: Using Text RAG for faster response.")
-                # Combine history and question to provide context to the model
-                full_query = f"Chat History:\n{history_text}\n\nQuestion: {question}"
-                response = qa_chain.invoke({"query": full_query}, config={"callbacks": callbacks})
-                result_text = response["result"]
-                source_docs = response.get("source_documents", [])
-            else:
-                result_text = "It seems this PDF hasn't been processed yet."
-
+        response = qa_chain({"query": question}, callbacks=callbacks)
         end_time = time.time()
-        
-        return {
-            "result": result_text,
-            "response_time": end_time - start_time,
-            "source_documents": source_docs
-        }
-    
-    def delete_pdf_index(self, pdf_file_path):
-        vector_store_path = self._get_vector_store_path(pdf_file_path)
-        pdf_filename = os.path.basename(pdf_file_path)
 
-        if pdf_filename in self._vector_store_cache:
-            del self._vector_store_cache[pdf_filename]
-        
-        if os.path.exists(vector_store_path):
-            shutil.rmtree(vector_store_path)
-            logger.info(f"Deleted vector store: {vector_store_path}")
+        return {
+            "result": response["result"],
+            "response_time": end_time - start_time,
+            "source_documents": response["source_documents"]
+        }
