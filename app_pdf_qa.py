@@ -90,7 +90,12 @@ def render_chat_page():
             full_response = ""
             try:
                 stream_handler = StreamHandler(message_placeholder)
-                response = st.session_state.engine.answer_question(prompt, callbacks=[stream_handler])
+                pdf_path = os.path.join("uploads", st.session_state.current_file)
+                response = st.session_state.engine.answer_question(
+                    prompt, 
+                    pdf_file_path=pdf_path, 
+                    callbacks=[stream_handler]
+                )
                 full_response = response.get("result", "No response from model.")
                 message_placeholder.markdown(full_response)
             except Exception as e:

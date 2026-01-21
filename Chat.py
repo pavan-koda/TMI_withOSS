@@ -3,6 +3,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from pdf_qa_engine import PDFQAEngine
 from model_config import MODEL_CONFIG
 from datetime import datetime
+import os
 
 st.set_page_config(page_title="Chat - AI Assistant", page_icon="💬", layout="wide")
 
@@ -18,21 +19,18 @@ class StreamHandler(BaseCallbackHandler):
         self.text += token
         self.token_count += 1
 
-        # Update UI less frequently for better performance
         if self.token_count % self.update_interval == 0 or len(token.strip()) == 0:
             self.container.markdown(self.text + "▌")
 
-        # Always update message context for stop functionality
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
     def on_llm_end(self, _response, **_kwargs) -> None:
-        # Final update without cursor
         self.container.markdown(self.text)
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
-def main():
+def render_chat_page():
     st.markdown("""
     <style>
     /* Global Styles */
@@ -82,52 +80,6 @@ def main():
         position: relative;
     }
 
-    /* Hide the default send button when stop button is active */
-    body:has(span#stop-btn-anchor) [data-testid="stChatInput"] button {
-        display: none !important;
-    }
-
-    /* Position the stop button exactly where the send button was */
-    div:has(span#stop-btn-anchor) {
-        position: fixed !important;
-        bottom: 18px !important;
-        right: 18px !important;
-        z-index: 99999 !important;
-    }
-
-    div:has(span#stop-btn-anchor) button {
-        width: 36px !important;
-        height: 36px !important;
-        border-radius: 4px !important;
-        background-color: #ef4444 !important;
-        color: white !important;
-        border: none !important;
-        padding: 0 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3) !important;
-        transition: all 0.2s ease;
-        font-size: 18px !important;
-        cursor: pointer !important;
-    }
-
-    div:has(span#stop-btn-anchor) button:hover {
-        background-color: #dc2626 !important;
-        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
-        transform: translateY(-2px);
-    }
-
-    div:has(span#stop-btn-anchor) button:active {
-        background-color: #b91c1c !important;
-        transform: translateY(0);
-    }
-
-    /* Spinner styling */
-    .stSpinner > div {
-        border-top-color: #3b82f6 !important;
-    }
-
     /* Chat message animations */
     .stChatMessage {
         animation: fadeIn 0.3s ease-in;
@@ -152,83 +104,85 @@ def main():
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
     }
-
-    /* Improve chat input responsiveness */
-    div[data-testid="stChatInput"] > div {
-        border-radius: 12px;
-        border: 2px solid #e2e8f0;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        background-color: white;
-    }
-
-    div[data-testid="stChatInput"] textarea {
-        color: #1e293b !important;
-        caret-color: #1e293b;
-    }
-
-    div[data-testid="stChatInput"] > div:focus-within {
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-    }
     </style>
     """, unsafe_allow_html=True)
 
-    # Initialize session state if accessed directly
+    st.title("💬 Chat with your Documents")
+
     if "engine" not in st.session_state:
         st.session_state.engine = PDFQAEngine(
             model_name=MODEL_CONFIG["model_name"],
             base_url=MODEL_CONFIG["base_url"]
         )
+
     if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "active_file" not in st.session_state:
-        st.session_state.active_file = None
+        st.session_state.messages = {}
 
-    st.title("💬 Chat Assistant")
+    try:
+        uploaded_pdf_files = [f for f in os.listdir("uploads") if f.endswith(".pdf")]
+    except FileNotFoundError:
+        uploaded_pdf_files = []
 
-    if not st.session_state.active_file:
-        st.warning("⚠️ No document active. Please go to the Documents page to select a file.")
-        if st.button("Go to Documents"):
-            st.switch_page("app_pdf_qa.py")
+    if not uploaded_pdf_files:
+        st.warning("No PDF documents found. Please go to the Admin page to upload some.")
+        if st.button("Go to Admin Page"):
+            st.session_state.page = "upload"
+            st.rerun()
         st.stop()
 
+    # If there's a previously active PDF, try to keep it, otherwise default to the first one
+    if "active_pdf" not in st.session_state or st.session_state.active_pdf not in uploaded_pdf_files:
+        st.session_state.active_pdf = uploaded_pdf_files[0]
+        
+    st.session_state.active_pdf = st.selectbox(
+        "Select a PDF to chat with:",
+        uploaded_pdf_files,
+        index=uploaded_pdf_files.index(st.session_state.active_pdf)
+    )
+    
+    active_pdf_name = st.session_state.active_pdf
+    if active_pdf_name not in st.session_state.messages:
+        st.session_state.messages[active_pdf_name] = []
+
     # Chat Interface
-    for i, message in enumerate(st.session_state.messages):
+    for message in st.session_state.messages[active_pdf_name]:
         role = message["role"]
         avatar = "👤" if role == "user" else "🤖"
         with st.chat_message(role, avatar=avatar):
             st.markdown(message["content"])
-            # Metadata display logic...
             if role == "assistant" and "response_time" in message:
                 st.caption(f"⏱️ {message['response_time']:.2f}s")
 
-    if prompt := st.chat_input("Ask a question about your PDF..."):
+    if prompt := st.chat_input(f"Ask a question about {active_pdf_name}..."):
         current_time = datetime.now().strftime("%H:%M:%S")
-        st.session_state.messages.append({"role": "user", "content": prompt, "timestamp": current_time})
+        st.session_state.messages[active_pdf_name].append({"role": "user", "content": prompt, "timestamp": current_time})
         
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
         with st.chat_message("assistant", avatar="🤖"):
             message_placeholder = st.empty()
-            stop_placeholder = st.empty()
             
-            # Pre-append assistant message
-            st.session_state.messages.append({"role": "assistant", "content": "", "timestamp": current_time})
-            current_msg_index = len(st.session_state.messages) - 1
+            st.session_state.messages[active_pdf_name].append({"role": "assistant", "content": "", "timestamp": current_time})
+            current_msg_index = len(st.session_state.messages[active_pdf_name]) - 1
 
             try:
-                stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[current_msg_index])
+                stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[active_pdf_name][current_msg_index])
                 
                 with st.spinner("Thinking..."):
-                    response = st.session_state.engine.answer_question(prompt, callbacks=[stream_handler])
+                    pdf_path = os.path.join("uploads", active_pdf_name)
+                    response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler])
                 
-                st.session_state.messages[current_msg_index]["content"] = response["result"]
-                st.session_state.messages[current_msg_index]["response_time"] = response["response_time"]
-                st.rerun()
+                st.session_state.messages[active_pdf_name][current_msg_index]["content"] = response["result"]
+                st.session_state.messages[active_pdf_name][current_msg_index]["response_time"] = response["response_time"]
+                message_placeholder.markdown(response["result"]) # Final update
 
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"An error occurred: {e}")
+
+# This structure allows calling the function from the main app
+def main():
+    render_chat_page()
 
 if __name__ == "__main__":
     main()
