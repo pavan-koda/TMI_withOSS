@@ -322,29 +322,30 @@ class ColPaliRetriever:
             # Search with FAISS if available
             index_path = data_path / f"{session_id}_colpali.faiss"
             if index_path.exists():
-                import faiss
+                try:
+                    import faiss
 
-                index = faiss.read_index(str(index_path))
-                scores, indices = index.search(
-                    query_embedding.reshape(1, -1).astype('float32'),
-                    top_k
-                )
+                    index = faiss.read_index(str(index_path))
+                    scores, indices = index.search(
+                        query_embedding.reshape(1, -1).astype('float32'),
+                        top_k
+                    )
 
-                results = []
-                for idx, score in zip(indices[0], scores[0]):
-                    if idx < len(metadata['page_images']):
-                        results.append({
-                            'page': idx + 1,
-                            'image_path': metadata['page_images'][idx],
-                            'score': float(score),
-                            'rank': len(results) + 1
-                        })
+                    results = []
+                    for idx, score in zip(indices[0], scores[0]):
+                        if idx < len(metadata['page_images']):
+                            results.append({
+                                'page': idx + 1,
+                                'image_path': metadata['page_images'][idx],
+                                'score': float(score),
+                                'rank': len(results) + 1
+                            })
+                    return results
+                except Exception as e:
+                    logger.warning(f"FAISS search failed, falling back to manual: {e}")
 
-                return results
-
-            else:
-                # Fallback: compute similarities manually
-                embeddings = metadata['embeddings']
+            # Fallback: compute similarities manually
+            embeddings = metadata['embeddings']
                 similarities = np.dot(embeddings, query_embedding)
 
                 # Get top-k indices
