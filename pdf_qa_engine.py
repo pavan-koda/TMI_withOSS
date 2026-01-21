@@ -5,6 +5,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_ollama import ChatOllama
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain.schema import Document
 import logging
 import time
 import os
@@ -44,6 +45,10 @@ class PDFQAEngine:
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             chunks = text_splitter.split_documents(documents)
             
+            if not chunks:
+                logger.warning(f"No text found in {pdf_file_path}. Creating placeholder for vector store.")
+                chunks = [Document(page_content="[This document contains no extractable text. It may be a scanned image.]", metadata={"source": pdf_file_path, "page": 0})]
+
             vector_store = FAISS.from_documents(chunks, self.embeddings)
             vector_store.save_local(vector_store_path)
             logger.info(f"Vector store saved to {vector_store_path}")
