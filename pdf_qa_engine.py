@@ -106,19 +106,16 @@ class PDFQAEngine:
 
         retriever = vector_store.as_retriever(search_kwargs={"k": 4})
         
-        prompt_template = """Use the following pieces of context and the chat history to answer the question at the end. 
+        prompt_template = """Use the following pieces of context to answer the question at the end. 
         If you don't know the answer, just say that you don't know, don't try to make up an answer.
         
         Context: {context}
-        
-        Chat History:
-        {chat_history}
         
         Question: {question}
         Answer:"""
         
         PROMPT = PromptTemplate(
-            template=prompt_template, input_variables=["context", "question", "chat_history"]
+            template=prompt_template, input_variables=["context", "question"]
         )
         
         return RetrievalQA.from_chain_type(
@@ -215,7 +212,9 @@ class PDFQAEngine:
         if not result_text:
             qa_chain = self._get_qa_chain(pdf_file_path)
             if qa_chain:
-                response = qa_chain.invoke({"query": question, "chat_history": history_text}, config={"callbacks": callbacks})
+                # Combine history and question to provide context to the model
+                full_query = f"Chat History:\n{history_text}\n\nQuestion: {question}"
+                response = qa_chain.invoke({"query": full_query}, config={"callbacks": callbacks})
                 result_text = response["result"]
                 source_docs = response.get("source_documents", [])
             else:
