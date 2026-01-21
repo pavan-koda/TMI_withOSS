@@ -11,6 +11,7 @@ import os
 import shutil
 from colpali_retriever import ColPaliRetriever
 from pdf_processor import PDFProcessor
+import fitz
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +177,21 @@ class PDFQAEngine:
                         self.metadata = {"page": page-1, "source": source}
                         self.page_content = ""
 
+                # Open PDF to extract text from identified pages
+                try:
+                    doc = fitz.open(pdf_file_path)
+                except Exception as e:
+                    logger.error(f"Error opening PDF for vision context: {e}")
+                    doc = None
+
                 for res in results:
                     page_num = res['page'] # 1-based
-                    context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n"
+                    page_content = doc[page_num-1].get_text() if doc and 0 <= page_num-1 < len(doc) else ""
+                    context_text += f"\n[Page {page_num} Content]: (Visual Match Score: {res['score']:.2f})\n{page_content}\n"
                     source_docs.append(MockDoc(page_num, pdf_filename))
+                
+                if doc:
+                    doc.close()
 
                 # Prompt the LLM with the visual context info
                 # (In a full VLM setup, we would pass the image, but here we pass the page reference)
