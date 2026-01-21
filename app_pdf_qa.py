@@ -9,7 +9,25 @@ from upload_page import render_upload_page
 st.set_page_config(page_title="TMI AI Assistant", layout="wide")
 
 class StreamHandler(BaseCallbackHandler):
-    # ... (StreamHandler class remains the same) ...
+    def __init__(self, container, initial_text="", message_context=None):
+        self.container = container
+        self.text = initial_text
+        self.token_count = 0
+        self.message_context = message_context
+        self.update_interval = 3
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        self.text += token
+        self.token_count += 1
+        if self.token_count % self.update_interval == 0 or len(token.strip()) == 0:
+            self.container.markdown(self.text + "▌")
+        if self.message_context is not None:
+            self.message_context["content"] = self.text
+
+    def on_llm_end(self, _response, **_kwargs) -> None:
+        self.container.markdown(self.text)
+        if self.message_context is not None:
+            self.message_context["content"] = self.text
 
 def render_chat_page():
     st.title("📄 TMI AI Assistant")
