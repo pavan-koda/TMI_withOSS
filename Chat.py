@@ -111,6 +111,17 @@ def render_chat_page():
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
     }
+    
+    @keyframes pulse {
+        0% { opacity: 0.4; }
+        50% { opacity: 1; }
+        100% { opacity: 0.4; }
+    }
+    .thinking-text {
+        animation: pulse 1.5s infinite ease-in-out;
+        color: #666;
+        font-style: italic;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -211,7 +222,7 @@ def render_chat_page():
             try:
                 stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[active_pdf_name][current_msg_index])
                 
-                message_placeholder.markdown("Thinking...")
+                message_placeholder.markdown('<span class="thinking-text">Thinking...</span>', unsafe_allow_html=True)
 
                 if active_pdf_name == "Select All":
                     pdf_path = "ALL_PDFS"
