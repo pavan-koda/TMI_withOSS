@@ -346,21 +346,21 @@ class ColPaliRetriever:
 
             # Fallback: compute similarities manually
             embeddings = metadata['embeddings']
-                similarities = np.dot(embeddings, query_embedding)
+            similarities = np.dot(embeddings, query_embedding)
 
-                # Get top-k indices
-                top_indices = np.argsort(similarities)[::-1][:top_k]
+            # Get top-k indices
+            top_indices = np.argsort(similarities)[::-1][:top_k]
 
-                results = []
-                for rank, idx in enumerate(top_indices, 1):
-                    results.append({
-                        'page': idx + 1,
-                        'image_path': metadata['page_images'][idx],
-                        'score': float(similarities[idx]),
-                        'rank': rank
-                    })
+            results = []
+            for rank, idx in enumerate(top_indices, 1):
+                results.append({
+                    'page': idx + 1,
+                    'image_path': metadata['page_images'][idx],
+                    'score': float(similarities[idx]),
+                    'rank': rank
+                })
 
-                return results
+            return results
 
         except Exception as e:
             logger.error(f"Error searching index: {str(e)}")
