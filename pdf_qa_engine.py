@@ -157,12 +157,18 @@ class PDFQAEngine:
         # --- VISION MODE ---
         if use_vision and pdf_file_path != "ALL_PDFS":
             pdf_filename = os.path.basename(pdf_file_path)
-            if not self.vision_retriever:
-                self.vision_retriever = ColPaliRetriever()
             
-            # Search using Vision (Finds the page image that looks like the answer)
-            results = self.vision_retriever.search(question, session_id=pdf_filename, data_dir=VECTOR_STORE_DIR, top_k=3)
+            results = []
+            vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
             
+            if os.path.exists(vision_meta_path):
+                if not self.vision_retriever:
+                    self.vision_retriever = ColPaliRetriever()
+                # Search using Vision (Finds the page image that looks like the answer)
+                results = self.vision_retriever.search(question, session_id=pdf_filename, data_dir=VECTOR_STORE_DIR, top_k=3)
+            else:
+                logger.warning(f"Vision index not found for {pdf_filename}. Skipping vision search.")
+
             if results:
                 # We found relevant pages visually. Now we need to get the text from those pages 
                 # to feed into the LLM (since Mistral is text-based).

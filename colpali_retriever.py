@@ -70,7 +70,7 @@ class ColPaliRetriever:
             model_name = "openai/clip-vit-large-patch14"
             logger.info(f"Loading fallback CLIP model: {model_name}")
 
-            self.processor = CLIPProcessor.from_pretrained(model_name)
+            self.processor = CLIPProcessor.from_pretrained(model_name, use_fast=True)
             self.model = CLIPModel.from_pretrained(model_name).to(self.device)
             self.model.eval()
 
