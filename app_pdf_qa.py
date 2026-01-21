@@ -183,3 +183,5 @@ def render_chat_page():
                             if isinstance(page, int): page += 1
                             source = os.path.basename(metadata.get("source", "Unknown"))
                             st.markdown(f"- **Page {page}** ({source})")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
