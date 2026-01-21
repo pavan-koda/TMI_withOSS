@@ -210,9 +210,35 @@ class PDFQAEngine:
                 if doc:
                     doc.close()
 
+                # Integrate Text-based RAG results (Hybrid Search)
+                # This ensures we answer text-based questions accurately even in Vision Mode
+                vector_store_path = self._get_vector_store_path(pdf_file_path)
+                vector_store = None
+                
+                if pdf_filename in self._vector_store_cache:
+                    vector_store = self._vector_store_cache[pdf_filename]
+                elif os.path.exists(vector_store_path):
+                    try:
+                        vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
+                        self._vector_store_cache[pdf_filename] = vector_store
+                    except Exception as e:
+                        logger.error(f"Error loading vector store for hybrid search: {e}")
+
+                if vector_store:
+                    try:
+                        text_retriever = vector_store.as_retriever(search_kwargs={"k": 2})
+                        text_docs = text_retriever.invoke(question)
+                        if text_docs:
+                            context_text += "\n--- Relevant Text Segments ---\n"
+                            for doc in text_docs:
+                                context_text += f"\n{doc.page_content}\n"
+                                source_docs.append(doc)
+                    except Exception as e:
+                        logger.warning(f"Text retrieval failed in vision mode: {e}")
+
                 # Prompt the LLM with the visual context info
                 # (In a full VLM setup, we would pass the image, but here we pass the page reference)
-                prompt = f"Chat History:\n{history_text}\n\nI found these pages visually relevant to the question: {question}\n\nContext:\n{context_text}\n\nPlease answer the question based on the document content found on these pages."
+                prompt = f"Chat History:\n{history_text}\n\nI found these pages relevant to the question: {question}\n\nContext:\n{context_text}\n\nPlease answer the question based on the document content found on these pages."
                 
                 response_text = self.llm.invoke(prompt, config={"callbacks": callbacks})
                 result_text = response_text.content if hasattr(response_text, "content") else str(response_text)

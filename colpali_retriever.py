@@ -58,10 +58,10 @@ class ColPaliRetriever:
             # Import ColPali dependencies
             from colpali_engine.models import ColPali, ColPaliProcessor
 
-            self.processor = ColPaliProcessor.from_pretrained(model_name)
+            self.processor = ColPaliProcessor.from_pretrained(model_name, use_fast=True)
             self.model = ColPali.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16 if self.use_half_precision else torch.float32
+                dtype=torch.float16 if self.use_half_precision else torch.float32
             ).to(self.device)
 
             self.model.eval()
@@ -144,10 +144,14 @@ class ColPaliRetriever:
 
                 else:
                     # ColPali encoding
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                    inputs = self.processor.process_images(images).to(self.device)
 
                     with torch.no_grad():
-                        embeddings = self.model(**inputs).last_hidden_state
+                        outputs = self.model(**inputs)
+                        if hasattr(outputs, 'last_hidden_state'):
+                            embeddings = outputs.last_hidden_state
+                        else:
+                            embeddings = outputs
                         # Mean pooling
                         embeddings = embeddings.mean(dim=1)
                         # Normalize
@@ -191,10 +195,14 @@ class ColPaliRetriever:
 
             else:
                 # ColPali query encoding
-                inputs = self.processor(text=[query], return_tensors="pt").to(self.device)
+                inputs = self.processor.process_queries([query]).to(self.device)
 
                 with torch.no_grad():
-                    query_embedding = self.model(**inputs).last_hidden_state
+                    outputs = self.model(**inputs)
+                    if hasattr(outputs, 'last_hidden_state'):
+                        query_embedding = outputs.last_hidden_state
+                    else:
+                        query_embedding = outputs
                     query_embedding = query_embedding.mean(dim=1)
                     query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
                     return query_embedding.cpu().numpy()[0]
