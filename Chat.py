@@ -248,4 +248,5 @@ def render_chat_page():
                             page = metadata.get("page", "Unknown")
                             if isinstance(page, int):
                                 page += 1
-                            source = os.path.basename(metadata.get("source", "
+                            source = os.path.basename(metadata.get("source", "Unknown"))
+                            st.markdown(f"- **Page {page}** ({source})")

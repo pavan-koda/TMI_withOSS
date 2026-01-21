@@ -24,8 +24,6 @@ source venv/bin/activate
 # Install dependencies
 echo "Checking dependencies..."
 pip install -r requirements.txt --quiet
-echo "Installing ColPali..."
-pip install colpali-engine --quiet
 
 # Check Ollama
 if ! command -v ollama &> /dev/null; then
