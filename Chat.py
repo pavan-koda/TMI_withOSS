@@ -136,6 +136,9 @@ def render_chat_page():
             st.session_state.page = "upload"
             st.rerun()
         st.stop()
+        
+    # Vision Toggle
+    use_vision = st.sidebar.toggle("Enable Vision Mode (ColPali)", value=False, help="Use this for PDFs with tables, charts, or images.")
 
     # Add Select All option
     pdf_options = ["Select All"] + uploaded_pdf_files
@@ -215,7 +218,7 @@ def render_chat_page():
                 else:
                     pdf_path = os.path.join("uploads", active_pdf_name)
 
-                response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler])
+                response = st.session_state.engine.answer_question(prompt, pdf_file_path=pdf_path, callbacks=[stream_handler], use_vision=use_vision)
                 
                 stop_placeholder.empty()
                 st.session_state.messages[active_pdf_name][current_msg_index]["content"] = response["result"]

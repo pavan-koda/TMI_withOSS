@@ -15,6 +15,8 @@ def render_upload_page():
         
     uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
     
+    process_vision = st.checkbox("Enable Advanced Vision Processing (Slower)", help="Check this if your PDF contains tables, charts, or scanned images. It will take longer to process.")
+    
     if uploaded_files:
         for uploaded_file in uploaded_files:
             file_path = os.path.join("uploads", uploaded_file.name)
@@ -24,7 +26,7 @@ def render_upload_page():
                 
                 with st.spinner(f"Processing {uploaded_file.name}..."):
                     try:
-                        st.session_state.engine.ingest_pdf(file_path)
+                        st.session_state.engine.ingest_pdf(file_path, use_vision=process_vision)
                         st.success(f"Successfully processed {uploaded_file.name}")
                         time.sleep(1) # Give a moment for the user to see the message
                         st.rerun() # Rerun to update the list of files

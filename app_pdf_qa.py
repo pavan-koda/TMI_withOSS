@@ -72,6 +72,9 @@ def render_chat_page():
         st.markdown("### Model Config")
         st.info(f"**Model:** {MODEL_CONFIG['model_name']}")
         st.info(f"**Backend:** Ollama")
+        
+        # Vision Toggle
+        use_vision = st.toggle("Enable Vision Mode (ColPali)", value=False, help="Use this for PDFs with tables, charts, or images.")
 
         if st.session_state.messages:
             st.markdown("---")
@@ -139,7 +142,8 @@ def render_chat_page():
                 response = st.session_state.engine.answer_question(
                     prompt, 
                     pdf_file_path=pdf_path, 
-                    callbacks=[stream_handler]
+                    callbacks=[stream_handler],
+                    use_vision=use_vision
                 )
                 
                 stop_placeholder.empty()
