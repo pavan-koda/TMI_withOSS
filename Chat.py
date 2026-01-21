@@ -30,6 +30,13 @@ class StreamHandler(BaseCallbackHandler):
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
+def format_duration(seconds):
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{seconds:.2f}s"
+
 def render_chat_page():
     st.markdown("""
     <style>
@@ -150,8 +157,29 @@ def render_chat_page():
         avatar = "👤" if role == "user" else "🤖"
         with st.chat_message(role, avatar=avatar):
             st.markdown(message["content"])
+            
+            # Display Metadata (Timestamp, Duration, Sources)
+            meta_text = ""
+            if "timestamp" in message:
+                meta_text += f"🕒 {message['timestamp']} "
+            
             if role == "assistant" and "response_time" in message:
-                st.caption(f"⏱️ {message['response_time']:.2f}s")
+                meta_text += f"| ⏱️ {format_duration(message['response_time'])}"
+            
+            if meta_text:
+                st.caption(meta_text)
+
+            if role == "assistant" and "source_documents" in message:
+                with st.expander("📚 Reference Pages"):
+                    for doc in message["source_documents"]:
+                        # Handle metadata safely
+                        metadata = doc.metadata if hasattr(doc, "metadata") else {}
+                        page = metadata.get("page", "Unknown")
+                        # Page numbers are usually 0-indexed
+                        if isinstance(page, int):
+                            page += 1
+                        source = os.path.basename(metadata.get("source", "Unknown"))
+                        st.markdown(f"- **Page {page}** ({source})")
 
     if prompt := st.chat_input(f"Ask a question about {active_pdf_name}..."):
         current_time = datetime.now().strftime("%H:%M:%S")
@@ -159,6 +187,7 @@ def render_chat_page():
         
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
+            st.caption(f"🕒 {current_time}")
 
         with st.chat_message("assistant", avatar="🤖"):
             message_placeholder = st.empty()
@@ -175,7 +204,22 @@ def render_chat_page():
                 
                 st.session_state.messages[active_pdf_name][current_msg_index]["content"] = response["result"]
                 st.session_state.messages[active_pdf_name][current_msg_index]["response_time"] = response["response_time"]
+                st.session_state.messages[active_pdf_name][current_msg_index]["source_documents"] = response["source_documents"]
+                
                 message_placeholder.markdown(response["result"]) # Final update
+
+                # Display metadata for the new message
+                st.caption(f"🕒 {current_time} | ⏱️ {format_duration(response['response_time'])}")
+                
+                if response["source_documents"]:
+                    with st.expander("📚 Reference Pages"):
+                        for doc in response["source_documents"]:
+                            metadata = doc.metadata if hasattr(doc, "metadata") else {}
+                            page = metadata.get("page", "Unknown")
+                            if isinstance(page, int):
+                                page += 1
+                            source = os.path.basename(metadata.get("source", "Unknown"))
+                            st.markdown(f"- **Page {page}** ({source})")
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
