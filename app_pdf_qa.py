@@ -1,10 +1,10 @@
 import streamlit as st
 import os
-import tempfile
 from datetime import datetime
 from langchain_core.callbacks import BaseCallbackHandler
 from pdf_qa_engine import PDFQAEngine
 from model_config import MODEL_CONFIG
+from upload_page import render_upload_page
 
 st.set_page_config(page_title="TMI AI Assistant", layout="wide")
 
@@ -14,277 +14,191 @@ class StreamHandler(BaseCallbackHandler):
         self.text = initial_text
         self.token_count = 0
         self.message_context = message_context
-        self.update_interval = 3  # Update UI every N tokens for better performance
+        self.update_interval = 1
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.text += token
         self.token_count += 1
-
-        # Update UI less frequently for better performance
         if self.token_count % self.update_interval == 0 or len(token.strip()) == 0:
             self.container.markdown(self.text + "▌")
-
-        # Always update message context for stop functionality
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
     def on_llm_end(self, _response, **_kwargs) -> None:
-        # Final update without cursor
         self.container.markdown(self.text)
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
-def main():
+def format_duration(seconds):
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{seconds:.2f} sec"
+
+def render_chat_page():
     st.title("📄 TMI AI Assistant")
-    
-    # Custom CSS for chat styling
+
+    # Add CSS for blinking effect
     st.markdown("""
     <style>
-    /* Smooth scrolling */
-    html {
-        scroll-behavior: smooth;
+    @keyframes pulse {
+        0% { opacity: 0.4; }
+        50% { opacity: 1; }
+        100% { opacity: 0.4; }
     }
-
-    /* Style for inline metadata */
-    .stCaption {
-        display: inline-block;
-        font-family: monospace;
+    .thinking-text {
+        animation: pulse 1.5s infinite ease-in-out;
         color: #666;
-        background-color: rgba(0,0,0,0.05);
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.85rem;
-    }
-
-    /* Page button styling */
-    .stButton button {
-        font-family: monospace;
-        font-size: 0.8rem;
-        padding: 2px 8px;
-        transition: all 0.2s ease;
-    }
-
-    .stButton button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    /* Stop button styling - Next to input field */
-    div[data-testid="stChatInput"] {
-        position: relative;
-    }
-
-    /* Hide the default send button when stop button is active */
-    body:has(span#stop-btn-anchor) [data-testid="stChatInput"] button {
-        display: none !important;
-    }
-
-    /* Position the stop button exactly where the send button was */
-    div:has(span#stop-btn-anchor) {
-        position: fixed !important;
-        bottom: 18px !important;
-        right: 18px !important;
-        z-index: 99999 !important;
-    }
-
-    div:has(span#stop-btn-anchor) button {
-        width: 36px !important;
-        height: 36px !important;
-        border-radius: 4px !important;
-        background-color: #ff4b4b !important;
-        color: white !important;
-        border: none !important;
-        padding: 0 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        box-shadow: 0 2px 8px rgba(255,75,75,0.3) !important;
-        transition: all 0.2s ease;
-        font-size: 18px !important;
-        cursor: pointer !important;
-    }
-
-    div:has(span#stop-btn-anchor) button:hover {
-        background-color: #ff3333 !important;
-        box-shadow: 0 4px 12px rgba(255,75,75,0.4) !important;
-        transform: translateY(-2px);
-    }
-
-    div:has(span#stop-btn-anchor) button:active {
-        background-color: #cc0000 !important;
-        transform: translateY(0);
-    }
-
-    /* Spinner styling */
-    .stSpinner > div {
-        border-top-color: #ff4b4b !important;
-    }
-
-    /* Chat message animations */
-    .stChatMessage {
-        animation: fadeIn 0.3s ease-in;
-    }
-
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Improve chat input responsiveness */
-    div[data-testid="stChatInput"] > div {
-        border-radius: 8px;
-        border: 2px solid #e0e0e0;
-        transition: border-color 0.2s ease;
-    }
-
-    div[data-testid="stChatInput"] > div:focus-within {
-        border-color: #ff4b4b;
-        box-shadow: 0 0 0 2px rgba(255,75,75,0.1);
+        font-style: italic;
     }
     </style>
     """, unsafe_allow_html=True)
-    
-    # Initialize session state
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
-
     if "engine" not in st.session_state:
-        st.session_state.engine = PDFQAEngine(
-            model_name=MODEL_CONFIG["model_name"],
-            base_url=MODEL_CONFIG["base_url"]
-        )
+        st.session_state.engine = PDFQAEngine(model_name=MODEL_CONFIG["model_name"], base_url=MODEL_CONFIG["base_url"])
 
-    if "is_generating" not in st.session_state:
-        st.session_state.is_generating = False
-
-    if "stop_requested" not in st.session_state:
-        st.session_state.stop_requested = False
-
-    # Sidebar for file upload
     with st.sidebar:
-        st.header("Upload Document")
-        uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
+        st.header("Controls")
+        if st.button("Go to Admin/Upload Page"):
+            st.session_state.page = "upload"
+            st.rerun()
+
+        st.markdown("---")
+        st.header("Select PDF")
         
-        if uploaded_file:
-            if "current_file" not in st.session_state or st.session_state.current_file != uploaded_file.name:
-                with st.spinner("Processing PDF..."):
-                    # Save to temp file
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_path = tmp_file.name
-                    
-                    try:
-                        st.session_state.engine.ingest_pdf(tmp_path)
-                        st.session_state.current_file = uploaded_file.name
-                        st.session_state.messages = [] # Reset chat on new file
-                        st.success("PDF Processed Successfully!")
-                    except Exception as e:
-                        st.error(f"Error processing PDF: {e}")
-                    finally:
-                        os.unlink(tmp_path)
-        
+        if not os.path.exists("uploads"):
+            os.makedirs("uploads")
+            
+        pdf_files = ["No PDF selected", "Select All"] + [f for f in os.listdir("uploads") if f.endswith(".pdf")]
+        selected_pdf = st.selectbox("Choose a PDF to chat with", options=pdf_files)
+
+        if selected_pdf != "No PDF selected":
+            if "current_file" not in st.session_state or st.session_state.current_file != selected_pdf:
+                st.session_state.current_file = selected_pdf
+                st.session_state.messages = []
+                st.success(f"Selected {selected_pdf}")
+        else:
+            st.session_state.current_file = None
+
+
         st.markdown("---")
         st.markdown("### Model Config")
         st.info(f"**Model:** {MODEL_CONFIG['model_name']}")
         st.info(f"**Backend:** Ollama")
+        
+        # Vision Toggle
+        use_vision = st.toggle("Enable Vision Mode (ColPali)", value=False, help="Use this for PDFs with tables, charts, or images.")
 
         if st.session_state.messages:
             st.markdown("---")
             if st.button("🗑️ Clear Chat", use_container_width=True):
                 st.session_state.messages = []
-                st.session_state.is_generating = False
-                st.session_state.stop_requested = False
                 st.rerun()
 
-    # Chat Interface - Display all messages
-    for i, message in enumerate(st.session_state.messages):
-        if message["role"] == "user":
-            _, col_msg = st.columns([2, 10])
-            with col_msg:
-                with st.chat_message("user", avatar="👤"):
-                    st.markdown(message["content"])
-                    if "timestamp" in message:
-                        st.caption(f"🕒 {message['timestamp']}")
-        else:
-            with st.chat_message("assistant", avatar="🤖"):
-                st.markdown(message["content"])
-                # Inline Metadata
-                meta_text = ""
-                if "timestamp" in message:
-                    meta_text += f"🕒 {message['timestamp']}"
-                if "response_time" in message and message["response_time"] > 0:
-                    rt = message["response_time"]
-                    if rt >= 60:
-                        meta_text += f" | ⏱️ {int(rt // 60)}m {int(rt % 60)}s"
-                    else:
-                        meta_text += f" | ⏱️ {rt:.2f}s"
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            
+            # Display Metadata
+            meta_parts = []
+            if "timestamp" in message:
+                meta_parts.append(f"🕒 {message['timestamp']}")
+            if message["role"] == "assistant" and "response_time" in message:
+                meta_parts.append(f"⏱️ {format_duration(message['response_time'])}")
+            
+            if meta_parts:
+                st.caption(" | ".join(meta_parts))
+            
+            if message["role"] == "assistant" and "source_documents" in message:
+                with st.expander("📚 Reference Pages"):
+                    for doc in message["source_documents"]:
+                        metadata = doc.metadata if hasattr(doc, "metadata") else {}
+                        page = metadata.get("page", "Unknown")
+                        if isinstance(page, int): page += 1
+                        source = os.path.basename(metadata.get("source", "Unknown"))
+                        st.markdown(f"- **Page {page}** ({source})")
 
-                # Layout: Metadata Text | Pages: [1] [2]
-                if "pages" in message and message["pages"]:
-                    cols = st.columns([4] + [0.5] * len(message["pages"]) + [5])
-                    with cols[0]:
-                        st.caption(meta_text + " | 📄 Pages:")
-                    for idx, pg in enumerate(message["pages"]):
-                        if cols[idx+1].button(str(pg), key=f"msg_{i}_{idx}"):
-                            st.session_state.pdf_page = pg
-                            st.session_state.show_right = True
-                            st.rerun()
-                elif meta_text:
-                    st.caption(meta_text)
-
-    # Input area
-    if prompt := st.chat_input("Ask a question about your PDF..."):
+    if prompt := st.chat_input("Ask a question about your PDF...", max_chars=2000):
+        if not st.session_state.get("current_file"):
+            st.warning("Please select a PDF before asking questions.")
+            return
+        
         current_time = datetime.now().strftime("%H:%M:%S")
         st.session_state.messages.append({"role": "user", "content": prompt, "timestamp": current_time})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+            st.caption(f"🕒 {current_time}")
 
-        # Pre-append assistant message to state
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": "",
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "response_time": 0,
-            "pages": []
-        })
-        current_msg_index = len(st.session_state.messages) - 1
+        with st.chat_message("assistant"):
+            col1, col2 = st.columns([0.9, 0.1])
+            with col1:
+                message_placeholder = st.empty()
+            with col2:
+                stop_placeholder = st.empty()
+            
+            if stop_placeholder.button("⏹️", key=f"stop_{current_time}", help="Stop generation"):
+                st.stop()
 
-        _, col_msg = st.columns([2, 10])
-        with col_msg:
-            with st.chat_message("user", avatar="👤"):
-                st.markdown(prompt)
-                st.caption(f"🕒 {current_time}")
-
-        with st.chat_message("assistant", avatar="🤖"):
-            message_placeholder = st.empty()
-            stop_placeholder = st.empty()
-
+            # Pre-append message to history so it persists if stopped
+            st.session_state.messages.append({"role": "assistant", "content": "", "timestamp": current_time})
+            current_msg_index = len(st.session_state.messages) - 1
+            
             try:
                 stream_handler = StreamHandler(message_placeholder, message_context=st.session_state.messages[current_msg_index])
-
-                with stop_placeholder:
-                    st.markdown('<span id="stop-btn-anchor"></span>', unsafe_allow_html=True)
-                    if st.button("⏹", key="stop_gen", help="Stop generation"):
-                        st.stop()
-
-                with st.spinner("🔍 Retrieving relevant context..."):
-                    response = st.session_state.engine.answer_question(prompt, callbacks=[stream_handler])
-
-                answer_text = response["result"]
-                time_taken = response["response_time"]
-                source_docs = response["source_documents"]
-                pages = sorted(list(set([doc.metadata.get("page", 0) + 1 for doc in source_docs]))) if source_docs else []
-
-                stop_placeholder.empty()
-                message_placeholder.markdown(answer_text)
-
-                st.session_state.messages[current_msg_index]["content"] = answer_text
-                st.session_state.messages[current_msg_index]["response_time"] = time_taken
-                st.session_state.messages[current_msg_index]["pages"] = pages
+                message_placeholder.markdown('<span class="thinking-text">Thinking...</span>', unsafe_allow_html=True)
                 
-                st.rerun()
+                if st.session_state.current_file == "Select All":
+                    pdf_path = "ALL_PDFS"
+                else:
+                    pdf_path = os.path.join("uploads", st.session_state.current_file)
 
-            except Exception as e:
+                # Get chat history (excluding current question and empty assistant placeholder)
+                history = st.session_state.messages[:-2]
+
+                response = st.session_state.engine.answer_question(
+                    prompt, 
+                    pdf_file_path=pdf_path, 
+                    callbacks=[stream_handler],
+                    use_vision=use_vision,
+                    chat_history=history
+                )
+                
                 stop_placeholder.empty()
+                full_response = response.get("result", "")
+                
+                # Update final state
+                st.session_state.messages[current_msg_index]["content"] = full_response
+                st.session_state.messages[current_msg_index]["response_time"] = response.get("response_time", 0)
+                st.session_state.messages[current_msg_index]["source_documents"] = response.get("source_documents", [])
+                
+                message_placeholder.markdown(full_response)
+                
+                # Show metadata immediately
+                st.caption(f"🕒 {current_time} | ⏱️ {format_duration(response['response_time'])}")
+                
+                if response["source_documents"]:
+                    with st.expander("📚 Reference Pages"):
+                        for doc in response["source_documents"]:
+                            metadata = doc.metadata if hasattr(doc, "metadata") else {}
+                            page = metadata.get("page", "Unknown")
+                            if isinstance(page, int): page += 1
+                            source = os.path.basename(metadata.get("source", "Unknown"))
+                            st.markdown(f"- **Page {page}** ({source})")
+                            
+            except Exception as e:
                 st.error(f"⚠️ Error: {str(e)}")
+
+def main():
+    if "page" not in st.session_state:
+        st.session_state.page = "chat"
+
+    if st.session_state.page == "chat":
+        render_chat_page()
+    elif st.session_state.page == "upload":
+        render_upload_page()
 
 if __name__ == "__main__":
     main()

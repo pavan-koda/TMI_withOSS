@@ -149,8 +149,8 @@ async function askQuestion() {
         return;
     }
 
-    if (question.length > 500) {
-        showStatus('Question is too long. Maximum 500 characters.', 'error');
+    if (question.length > 2000) {
+        showStatus('Question is too long. Maximum 1000 characters.', 'error');
         return;
     }
 

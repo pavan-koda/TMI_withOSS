@@ -13,6 +13,15 @@ import torch
 from PIL import Image
 import pickle
 
+# Patch for transformers compatibility with older torch versions
+# Fixes: AttributeError: module 'torch.compiler' has no attribute 'is_compiling'
+if hasattr(torch, "compiler") and not hasattr(torch.compiler, "is_compiling"):
+    torch.compiler.is_compiling = lambda: False
+elif not hasattr(torch, "compiler"):
+    class MockCompiler:
+        def is_compiling(self): return False
+    torch.compiler = MockCompiler()
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,14 +58,17 @@ class ColPaliRetriever:
             # Import ColPali dependencies
             from colpali_engine.models import ColPali, ColPaliProcessor
 
-            self.processor = ColPaliProcessor.from_pretrained(model_name)
+            self.processor = ColPaliProcessor.from_pretrained(model_name, use_fast=True)
             self.model = ColPali.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16 if self.use_half_precision else torch.float32
+                dtype=torch.float16 if self.use_half_precision else torch.float32
             ).to(self.device)
 
             self.model.eval()
-            logger.info("ColPali model loaded successfully")
+            param_count = sum(p.numel() for p in self.model.parameters())
+            model_size = sum(p.numel() * p.element_size() for p in self.model.parameters())
+            model_size_gb = model_size / (1024**3)
+            logger.info(f"ColPali model loaded successfully. Parameters: {param_count:,} | Size: {model_size_gb:.2f} GB")
 
         except ImportError:
             logger.warning("ColPali not installed. Using fallback CLIP-based retriever")
@@ -70,7 +82,7 @@ class ColPaliRetriever:
             model_name = "openai/clip-vit-large-patch14"
             logger.info(f"Loading fallback CLIP model: {model_name}")
 
-            self.processor = CLIPProcessor.from_pretrained(model_name)
+            self.processor = CLIPProcessor.from_pretrained(model_name, use_fast=True)
             self.model = CLIPModel.from_pretrained(model_name).to(self.device)
             self.model.eval()
 
@@ -132,10 +144,14 @@ class ColPaliRetriever:
 
                 else:
                     # ColPali encoding
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                    inputs = self.processor.process_images(images).to(self.device)
 
                     with torch.no_grad():
-                        embeddings = self.model(**inputs).last_hidden_state
+                        outputs = self.model(**inputs)
+                        if hasattr(outputs, 'last_hidden_state'):
+                            embeddings = outputs.last_hidden_state
+                        else:
+                            embeddings = outputs
                         # Mean pooling
                         embeddings = embeddings.mean(dim=1)
                         # Normalize
@@ -179,10 +195,14 @@ class ColPaliRetriever:
 
             else:
                 # ColPali query encoding
-                inputs = self.processor(text=[query], return_tensors="pt").to(self.device)
+                inputs = self.processor.process_queries([query]).to(self.device)
 
                 with torch.no_grad():
-                    query_embedding = self.model(**inputs).last_hidden_state
+                    outputs = self.model(**inputs)
+                    if hasattr(outputs, 'last_hidden_state'):
+                        query_embedding = outputs.last_hidden_state
+                    else:
+                        query_embedding = outputs
                     query_embedding = query_embedding.mean(dim=1)
                     query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
                     return query_embedding.cpu().numpy()[0]
@@ -302,44 +322,45 @@ class ColPaliRetriever:
             # Search with FAISS if available
             index_path = data_path / f"{session_id}_colpali.faiss"
             if index_path.exists():
-                import faiss
+                try:
+                    import faiss
 
-                index = faiss.read_index(str(index_path))
-                scores, indices = index.search(
-                    query_embedding.reshape(1, -1).astype('float32'),
-                    top_k
-                )
+                    index = faiss.read_index(str(index_path))
+                    scores, indices = index.search(
+                        query_embedding.reshape(1, -1).astype('float32'),
+                        top_k
+                    )
 
-                results = []
-                for idx, score in zip(indices[0], scores[0]):
-                    if idx < len(metadata['page_images']):
-                        results.append({
-                            'page': idx + 1,
-                            'image_path': metadata['page_images'][idx],
-                            'score': float(score),
-                            'rank': len(results) + 1
-                        })
+                    results = []
+                    for idx, score in zip(indices[0], scores[0]):
+                        if idx < len(metadata['page_images']):
+                            results.append({
+                                'page': idx + 1,
+                                'image_path': metadata['page_images'][idx],
+                                'score': float(score),
+                                'rank': len(results) + 1
+                            })
+                    return results
+                except Exception as e:
+                    logger.warning(f"FAISS search failed, falling back to manual: {e}")
 
-                return results
+            # Fallback: compute similarities manually
+            embeddings = metadata['embeddings']
+            similarities = np.dot(embeddings, query_embedding)
 
-            else:
-                # Fallback: compute similarities manually
-                embeddings = metadata['embeddings']
-                similarities = np.dot(embeddings, query_embedding)
+            # Get top-k indices
+            top_indices = np.argsort(similarities)[::-1][:top_k]
 
-                # Get top-k indices
-                top_indices = np.argsort(similarities)[::-1][:top_k]
+            results = []
+            for rank, idx in enumerate(top_indices, 1):
+                results.append({
+                    'page': idx + 1,
+                    'image_path': metadata['page_images'][idx],
+                    'score': float(similarities[idx]),
+                    'rank': rank
+                })
 
-                results = []
-                for rank, idx in enumerate(top_indices, 1):
-                    results.append({
-                        'page': idx + 1,
-                        'image_path': metadata['page_images'][idx],
-                        'score': float(similarities[idx]),
-                        'rank': rank
-                    })
-
-                return results
+            return results
 
         except Exception as e:
             logger.error(f"Error searching index: {str(e)}")
