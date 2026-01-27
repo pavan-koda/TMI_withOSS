@@ -24,9 +24,31 @@ QA_CONFIG = {
     'max_answer_length': 3000,
 }
 
-# Embedding Model Configuration
+# Embedding Model Configuration - Using better model for semantic understanding
 EMBEDDING_CONFIG = {
-    'model_name': 'all-MiniLM-L6-v2',
+    # Options: 'all-MiniLM-L6-v2' (fast), 'all-mpnet-base-v2' (better), 'BAAI/bge-base-en-v1.5' (best)
+    'model_name': 'BAAI/bge-base-en-v1.5',
+}
+
+# Reranker Configuration for improved accuracy
+RERANKER_CONFIG = {
+    'enabled': True,
+    # Cross-encoder model for reranking retrieved chunks
+    'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2',
+    # Number of top results after reranking
+    'top_k': 5,
+}
+
+# Retrieval Configuration
+RETRIEVAL_CONFIG = {
+    # Number of chunks to initially retrieve (before reranking)
+    'initial_k': 10,
+    # Use Maximum Marginal Relevance for diverse results
+    'use_mmr': True,
+    # MMR diversity factor (0 = max relevance, 1 = max diversity)
+    'mmr_lambda': 0.7,
+    # Minimum similarity score threshold
+    'score_threshold': 0.3,
 }
 
 # Generator Model Configuration
@@ -35,10 +57,12 @@ GENERATOR_CONFIG = {
     'use_generator': False,
 }
 
-# PDF Processing Configuration
+# PDF Processing Configuration - Optimized for better context preservation
 PDF_CONFIG = {
-    'chunk_size': 400,  # words per chunk
-    'chunk_overlap': 50,  # overlapping words between chunks
+    'chunk_size': 800,  # characters per chunk (increased for better context)
+    'chunk_overlap': 200,  # overlapping characters between chunks (increased for continuity)
+    # Separators prioritize paragraph and sentence boundaries
+    'separators': ["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " "],
 }
 
 # Flask Configuration
