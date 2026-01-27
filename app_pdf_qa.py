@@ -58,7 +58,13 @@ def render_chat_page():
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "engine" not in st.session_state:
-        st.session_state.engine = PDFQAEngine(model_name=MODEL_CONFIG["model_name"], base_url=MODEL_CONFIG["base_url"])
+        with st.spinner("Loading AI models... This may take a moment on first run."):
+            try:
+                st.session_state.engine = PDFQAEngine(model_name=MODEL_CONFIG["model_name"], base_url=MODEL_CONFIG["base_url"])
+            except Exception as e:
+                st.error(f"Failed to initialize: {e}")
+                st.info("Make sure Ollama is running with the Mistral model.")
+                return
 
     with st.sidebar:
         st.header("Controls")
@@ -79,7 +85,21 @@ def render_chat_page():
             if "current_file" not in st.session_state or st.session_state.current_file != selected_pdf:
                 st.session_state.current_file = selected_pdf
                 st.session_state.messages = []
-                st.success(f"Selected {selected_pdf}")
+
+                # Auto-index if not already indexed
+                if selected_pdf != "Select All":
+                    pdf_path = os.path.join("uploads", selected_pdf)
+                    if not st.session_state.engine.is_pdf_indexed(pdf_path):
+                        with st.spinner(f"Indexing {selected_pdf}..."):
+                            try:
+                                st.session_state.engine.ingest_pdf(pdf_path)
+                                st.success(f"Indexed and selected {selected_pdf}")
+                            except Exception as e:
+                                st.error(f"Failed to index: {e}")
+                    else:
+                        st.success(f"Selected {selected_pdf}")
+                else:
+                    st.success(f"Selected all PDFs")
         else:
             st.session_state.current_file = None
 
@@ -88,9 +108,6 @@ def render_chat_page():
         st.markdown("### Model Config")
         st.info(f"**Model:** {MODEL_CONFIG['model_name']}")
         st.info(f"**Backend:** Ollama")
-        
-        # Vision Toggle
-        use_vision = st.toggle("Enable Vision Mode (ColPali)", value=False, help="Use this for PDFs with tables, charts, or images.")
 
         if st.session_state.messages:
             st.markdown("---")
@@ -159,10 +176,9 @@ def render_chat_page():
                 history = st.session_state.messages[:-2]
 
                 response = st.session_state.engine.answer_question(
-                    prompt, 
-                    pdf_file_path=pdf_path, 
+                    prompt,
+                    pdf_file_path=pdf_path,
                     callbacks=[stream_handler],
-                    use_vision=use_vision,
                     chat_history=history
                 )
                 

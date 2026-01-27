@@ -3,19 +3,46 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import ChatOllama
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
 from langchain.schema import Document
-from sentence_transformers import CrossEncoder
 import logging
 import time
 import os
 import re
 import shutil
-from colpali_retriever import ColPaliRetriever
-from pdf_processor import PDFProcessor
-import fitz
-from config import EMBEDDING_CONFIG, RERANKER_CONFIG, RETRIEVAL_CONFIG, PDF_CONFIG
+
+# Try to import CrossEncoder for reranking
+try:
+    from sentence_transformers import CrossEncoder
+    CROSSENCODER_AVAILABLE = True
+except ImportError:
+    CROSSENCODER_AVAILABLE = False
+    logging.warning("CrossEncoder not available. Install sentence-transformers for reranking support.")
+
+# Import config with fallback defaults
+try:
+    from config import EMBEDDING_CONFIG, PDF_CONFIG
+except ImportError:
+    EMBEDDING_CONFIG = {'model_name': 'BAAI/bge-base-en-v1.5'}
+    PDF_CONFIG = {'chunk_size': 800, 'chunk_overlap': 200}
+
+try:
+    from config import RERANKER_CONFIG
+except (ImportError, KeyError):
+    RERANKER_CONFIG = {
+        'enabled': True,
+        'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2',
+        'top_k': 5
+    }
+
+try:
+    from config import RETRIEVAL_CONFIG
+except (ImportError, KeyError):
+    RETRIEVAL_CONFIG = {
+        'initial_k': 10,
+        'use_mmr': True,
+        'mmr_lambda': 0.7,
+        'score_threshold': 0.3
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +56,20 @@ class PDFQAEngine:
         # Use better embedding model from config
         embedding_model = EMBEDDING_CONFIG.get('model_name', 'BAAI/bge-base-en-v1.5')
         logger.info(f"Loading embedding model: {embedding_model}")
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}  # Important for BGE models
-        )
+
+        try:
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=embedding_model,
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load {embedding_model}: {e}. Falling back to all-MiniLM-L6-v2")
+            self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
         # Initialize cross-encoder reranker for improved accuracy
         self.reranker = None
-        if RERANKER_CONFIG.get('enabled', True):
+        if CROSSENCODER_AVAILABLE and RERANKER_CONFIG.get('enabled', True):
             try:
                 reranker_model = RERANKER_CONFIG.get('model_name', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
                 logger.info(f"Loading reranker model: {reranker_model}")
@@ -48,10 +80,6 @@ class PDFQAEngine:
         self._vector_store_cache = {}
         if not os.path.exists(VECTOR_STORE_DIR):
             os.makedirs(VECTOR_STORE_DIR)
-
-        # Vision components (lazy loaded)
-        self.vision_retriever = None
-        self.pdf_processor = None
 
     def _get_vector_store_path(self, pdf_file_path):
         pdf_filename = os.path.basename(pdf_file_path)
@@ -73,7 +101,6 @@ class PDFQAEngine:
         pdf_name = os.path.basename(pdf_file_path)
 
         for i, chunk in enumerate(chunks):
-            # Add page context to metadata
             page_num = chunk.metadata.get('page', 0)
 
             # Create enhanced content with context header
@@ -92,10 +119,10 @@ class PDFQAEngine:
 
     def ingest_pdf(self, pdf_file_path, use_vision=False):
         """Ingest PDF with improved chunking strategy."""
-        # 1. Standard Text Ingestion (Always do this as fallback/base)
         vector_store_path = self._get_vector_store_path(pdf_file_path)
+
         if not os.path.exists(vector_store_path):
-            logger.info(f"Ingesting PDF (Text): {pdf_file_path}")
+            logger.info(f"Ingesting PDF: {pdf_file_path}")
             loader = PyPDFLoader(pdf_file_path)
             documents = loader.load()
 
@@ -118,9 +145,9 @@ class PDFQAEngine:
             chunks = text_splitter.split_documents(documents)
 
             if not chunks:
-                logger.warning(f"No text found in {pdf_file_path}. Creating placeholder for vector store.")
+                logger.warning(f"No text found in {pdf_file_path}. Creating placeholder.")
                 chunks = [Document(
-                    page_content="[This document contains no extractable text. It may be a scanned image.]",
+                    page_content="[This document contains no extractable text.]",
                     metadata={"source": pdf_file_path, "page": 0}
                 )]
 
@@ -132,33 +159,6 @@ class PDFQAEngine:
             vector_store = FAISS.from_documents(chunks, self.embeddings)
             vector_store.save_local(vector_store_path)
             logger.info(f"Vector store saved to {vector_store_path}")
-
-        # 2. Vision Ingestion (Optional - Slower but handles tables/images)
-        if use_vision:
-            pdf_filename = os.path.basename(pdf_file_path)
-            vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
-
-            if not os.path.exists(vision_meta_path):
-                logger.info(f"Ingesting PDF (Vision Mode - ColPali): {pdf_file_path}")
-                if not self.pdf_processor:
-                    self.pdf_processor = PDFProcessor()
-
-                # Process PDF to images
-                processed_data = self.pdf_processor.process_pdf(
-                    pdf_file_path,
-                    os.path.join("uploads", "processed", pdf_filename)
-                )
-
-                if processed_data:
-                    if not self.vision_retriever:
-                        self.vision_retriever = ColPaliRetriever()
-
-                    # Create Index
-                    self.vision_retriever.create_index(
-                        page_images=processed_data['page_images'],
-                        session_id=pdf_filename,
-                        data_dir=VECTOR_STORE_DIR
-                    )
 
     def _rerank_documents(self, query, documents, top_k=5):
         """Rerank documents using cross-encoder for better relevance."""
@@ -176,35 +176,52 @@ class PDFQAEngine:
             scored_docs = list(zip(documents, scores))
             scored_docs.sort(key=lambda x: x[1], reverse=True)
 
-            # Log reranking results for debugging
-            logger.info(f"Reranking results - Top scores: {[f'{s:.3f}' for _, s in scored_docs[:3]]}")
+            logger.info(f"Reranking - Top scores: {[f'{s:.3f}' for _, s in scored_docs[:3]]}")
 
-            # Return top_k documents
             return [doc for doc, _ in scored_docs[:top_k]]
         except Exception as e:
             logger.warning(f"Reranking failed: {e}. Using original order.")
             return documents[:top_k]
 
     def _preprocess_query(self, query):
-        """Preprocess and potentially expand the query for better matching."""
-        # Clean the query
+        """Preprocess query for better matching."""
         query = query.strip()
 
-        # Handle common question patterns for better semantic matching
         # Remove filler words that don't add semantic meaning
         query = re.sub(r'\b(please|kindly|can you|could you|tell me|what is|what are)\b', '', query, flags=re.IGNORECASE)
         query = query.strip()
 
-        # If query is very short, it might be a keyword search - keep it as is
         if len(query.split()) <= 2:
             return query
 
         return query
 
-    def _get_qa_chain(self, pdf_file_path):
-        """Create QA chain with improved retrieval settings."""
-        vector_store = None
+    def _is_greeting(self, text):
+        greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
+        text = text.lower().strip(" .!,")
+        return text in greetings
 
+    def _extract_relevant_context(self, documents, query):
+        """Extract and format the most relevant parts of retrieved documents."""
+        context_parts = []
+        seen_content = set()
+
+        for doc in documents:
+            content = doc.metadata.get('original_content', doc.page_content)
+
+            # Avoid duplicate content
+            content_hash = hash(content[:100] if len(content) > 100 else content)
+            if content_hash in seen_content:
+                continue
+            seen_content.add(content_hash)
+
+            page = doc.metadata.get('page', 'Unknown')
+            context_parts.append(f"[Page {page + 1 if isinstance(page, int) else page}]: {content}")
+
+        return "\n\n---\n\n".join(context_parts)
+
+    def _load_vector_store(self, pdf_file_path):
+        """Load vector store for a PDF, with caching."""
         if pdf_file_path == "ALL_PDFS":
             vector_stores = []
             if os.path.exists(VECTOR_STORE_DIR):
@@ -224,103 +241,31 @@ class PDFQAEngine:
                 vector_store = vector_stores[0]
                 for vs in vector_stores[1:]:
                     vector_store.merge_from(vs)
-        else:
-            vector_store_path = self._get_vector_store_path(pdf_file_path)
-            pdf_filename = os.path.basename(pdf_file_path)
+                return vector_store
+            return None
 
-            if pdf_filename in self._vector_store_cache:
-                vector_store = self._vector_store_cache[pdf_filename]
-            elif os.path.exists(vector_store_path):
+        vector_store_path = self._get_vector_store_path(pdf_file_path)
+        pdf_filename = os.path.basename(pdf_file_path)
+
+        if pdf_filename in self._vector_store_cache:
+            return self._vector_store_cache[pdf_filename]
+
+        if os.path.exists(vector_store_path):
+            try:
                 vector_store = FAISS.load_local(
                     vector_store_path,
                     self.embeddings,
                     allow_dangerous_deserialization=True
                 )
                 self._vector_store_cache[pdf_filename] = vector_store
+                return vector_store
+            except Exception as e:
+                logger.error(f"Error loading vector store: {e}")
 
-        if not vector_store:
-            return None
-
-        # Get retrieval settings from config
-        initial_k = RETRIEVAL_CONFIG.get('initial_k', 10)
-        use_mmr = RETRIEVAL_CONFIG.get('use_mmr', True)
-        mmr_lambda = RETRIEVAL_CONFIG.get('mmr_lambda', 0.7)
-
-        # Use MMR (Maximum Marginal Relevance) for diverse, relevant results
-        if use_mmr:
-            retriever = vector_store.as_retriever(
-                search_type="mmr",
-                search_kwargs={
-                    "k": initial_k,
-                    "lambda_mult": mmr_lambda,  # Balance between relevance and diversity
-                    "fetch_k": initial_k * 2  # Fetch more candidates for MMR selection
-                }
-            )
-        else:
-            retriever = vector_store.as_retriever(
-                search_kwargs={"k": initial_k}
-            )
-
-        # Improved prompt template for more accurate answers
-        prompt_template = """You are a precise document analysis assistant. Your task is to answer questions ONLY using the information provided in the context below.
-
-CRITICAL INSTRUCTIONS:
-1. Read the context carefully and thoroughly before answering.
-2. Base your answer STRICTLY on the information in the context - do not add external knowledge.
-3. If the exact answer is in the context, quote or paraphrase it accurately.
-4. If the context contains partial information, provide what is available and note what's missing.
-5. If the answer is NOT in the context, respond: "I cannot find this information in the provided document."
-6. For numerical data, dates, or specific facts - be precise and cite the source page if mentioned.
-7. If multiple pieces of context are relevant, synthesize them into a coherent answer.
-
-Context from the document:
-{context}
-
-Question: {question}
-
-Provide a clear, accurate answer based solely on the context above:"""
-
-        PROMPT = PromptTemplate(
-            template=prompt_template,
-            input_variables=["context", "question"]
-        )
-
-        return RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={"prompt": PROMPT},
-            return_source_documents=True
-        )
-
-    def _is_greeting(self, text):
-        greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
-        text = text.lower().strip(" .!,")
-        return text in greetings
-
-    def _extract_relevant_context(self, documents, query):
-        """Extract and format the most relevant parts of retrieved documents."""
-        context_parts = []
-        seen_content = set()
-
-        for doc in documents:
-            # Get original content if available, otherwise use page_content
-            content = doc.metadata.get('original_content', doc.page_content)
-
-            # Avoid duplicate content
-            content_hash = hash(content[:100])
-            if content_hash in seen_content:
-                continue
-            seen_content.add(content_hash)
-
-            # Add page reference
-            page = doc.metadata.get('page', 'Unknown')
-            context_parts.append(f"[Page {page + 1 if isinstance(page, int) else page}]: {content}")
-
-        return "\n\n---\n\n".join(context_parts)
+        return None
 
     def answer_question(self, question, pdf_file_path, callbacks=None, use_vision=False, chat_history=None):
-        """Answer question with improved retrieval, reranking, and context handling."""
+        """Answer question with improved retrieval and reranking."""
         start_time = time.time()
 
         if self._is_greeting(question):
@@ -333,200 +278,78 @@ Provide a clear, accurate answer based solely on the context above:"""
         if chat_history is None:
             chat_history = []
 
-        # Format chat history for context
+        # Format chat history for context (last 4 messages)
         history_text = ""
-        for msg in chat_history[-4:]:  # Only use last 4 messages for context
+        for msg in chat_history[-4:]:
             role = msg.get("role", "").capitalize()
             content = msg.get("content", "")
             if role and content:
                 history_text += f"{role}: {content}\n"
 
-        # Preprocess the query for better matching
+        # Preprocess the query
         processed_query = self._preprocess_query(question)
 
-        result_text = ""
-        source_docs = []
+        # Load vector store
+        vector_store = self._load_vector_store(pdf_file_path)
 
-        # --- VISION MODE ---
-        if use_vision and pdf_file_path != "ALL_PDFS":
-            pdf_filename = os.path.basename(pdf_file_path)
+        if not vector_store:
+            return {
+                "result": "This PDF hasn't been processed yet. Please upload and process it first.",
+                "response_time": time.time() - start_time,
+                "source_documents": []
+            }
 
-            results = []
-            vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
+        logger.info("Using enhanced Text RAG with reranking.")
 
-            if os.path.exists(vision_meta_path):
-                if not self.vision_retriever:
-                    self.vision_retriever = ColPaliRetriever()
-                results = self.vision_retriever.search(
-                    question,
-                    session_id=pdf_filename,
-                    data_dir=VECTOR_STORE_DIR,
-                    top_k=3
+        # Get retrieval settings
+        initial_k = RETRIEVAL_CONFIG.get('initial_k', 10)
+        use_mmr = RETRIEVAL_CONFIG.get('use_mmr', True)
+        mmr_lambda = RETRIEVAL_CONFIG.get('mmr_lambda', 0.7)
+        reranker_top_k = RERANKER_CONFIG.get('top_k', 5)
+
+        # Retrieve documents using MMR for diversity
+        try:
+            if use_mmr:
+                retrieved_docs = vector_store.max_marginal_relevance_search(
+                    processed_query,
+                    k=initial_k,
+                    lambda_mult=mmr_lambda,
+                    fetch_k=initial_k * 2
                 )
             else:
-                logger.warning(f"Vision index not found for {pdf_filename}. Falling back to text mode.")
+                retrieved_docs = vector_store.similarity_search(processed_query, k=initial_k)
+        except Exception as e:
+            logger.error(f"Retrieval failed: {e}")
+            retrieved_docs = []
 
-            if results:
-                logger.info(f"Vision Mode: Found {len(results)} relevant pages using ColPali.")
-                context_text = ""
+        if not retrieved_docs:
+            return {
+                "result": "I couldn't find relevant information in the document for your question.",
+                "response_time": time.time() - start_time,
+                "source_documents": []
+            }
 
-                class MockDoc:
-                    def __init__(self, page, source, content=""):
-                        self.metadata = {"page": page-1, "source": source}
-                        self.page_content = content
+        # Apply reranking for better relevance
+        if self.reranker and retrieved_docs:
+            logger.info(f"Reranking {len(retrieved_docs)} documents...")
+            retrieved_docs = self._rerank_documents(question, retrieved_docs, top_k=reranker_top_k)
 
-                try:
-                    doc = fitz.open(pdf_file_path)
-                except Exception as e:
-                    logger.error(f"Error opening PDF for vision context: {e}")
-                    doc = None
+        source_docs = retrieved_docs
 
-                for res in results:
-                    page_num = int(res['page'])
-                    page_content = ""
-                    try:
-                        if doc and 0 <= page_num-1 < len(doc):
-                            page_content = doc[page_num-1].get_text()
-                            page_content = self._preprocess_text(page_content)
-                    except Exception as e:
-                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
+        # Format context from reranked documents
+        context = self._extract_relevant_context(retrieved_docs, question)
 
-                    if not page_content or not page_content.strip():
-                        page_content = "[Visual Content Only - This page contains images/tables that cannot be extracted as text.]"
+        # Build the prompt
+        prompt = f"""You are a precise document analysis assistant. Answer the question based ONLY on the provided context.
 
-                    context_text += f"\n[Page {page_num} - Visual Match Score: {res['score']:.2f}]:\n{page_content}\n"
-                    source_docs.append(MockDoc(page_num, pdf_filename, page_content))
-
-                if doc:
-                    doc.close()
-
-                # Hybrid: Also include text-based retrieval results
-                vector_store_path = self._get_vector_store_path(pdf_file_path)
-                vector_store = None
-
-                if pdf_filename in self._vector_store_cache:
-                    vector_store = self._vector_store_cache[pdf_filename]
-                elif os.path.exists(vector_store_path):
-                    try:
-                        vector_store = FAISS.load_local(
-                            vector_store_path,
-                            self.embeddings,
-                            allow_dangerous_deserialization=True
-                        )
-                        self._vector_store_cache[pdf_filename] = vector_store
-                    except Exception as e:
-                        logger.error(f"Error loading vector store for hybrid search: {e}")
-
-                if vector_store:
-                    try:
-                        # Get more text results for hybrid mode
-                        text_docs = vector_store.similarity_search(processed_query, k=4)
-
-                        # Rerank text results
-                        if self.reranker and text_docs:
-                            text_docs = self._rerank_documents(question, text_docs, top_k=3)
-
-                        if text_docs:
-                            context_text += "\n\n--- Additional Text Context ---\n"
-                            for tdoc in text_docs:
-                                content = tdoc.metadata.get('original_content', tdoc.page_content)
-                                context_text += f"\n{content}\n"
-                                source_docs.append(tdoc)
-                    except Exception as e:
-                        logger.warning(f"Text retrieval failed in vision mode: {e}")
-
-                # Generate answer with vision context
-                prompt = f"""Based on the following document content, answer the question accurately.
-
-Previous conversation:
-{history_text}
-
-Document Content:
-{context_text}
-
-Question: {question}
-
-Provide a clear, accurate answer based on the document content:"""
-
-                response_text = self.llm.invoke(prompt, config={"callbacks": callbacks})
-                result_text = response_text.content if hasattr(response_text, "content") else str(response_text)
-
-        # --- STANDARD TEXT MODE (Default or Fallback) ---
-        if not result_text:
-            # First, get documents directly for reranking
-            vector_store_path = self._get_vector_store_path(pdf_file_path)
-            pdf_filename = os.path.basename(pdf_file_path) if pdf_file_path != "ALL_PDFS" else "ALL_PDFS"
-            vector_store = None
-
-            if pdf_file_path == "ALL_PDFS":
-                # Load all vector stores
-                vector_stores = []
-                if os.path.exists(VECTOR_STORE_DIR):
-                    for filename in os.listdir(VECTOR_STORE_DIR):
-                        if filename.endswith(".faiss"):
-                            try:
-                                vs = FAISS.load_local(
-                                    os.path.join(VECTOR_STORE_DIR, filename),
-                                    self.embeddings,
-                                    allow_dangerous_deserialization=True
-                                )
-                                vector_stores.append(vs)
-                            except Exception as e:
-                                logger.error(f"Error loading {filename}: {e}")
-
-                if vector_stores:
-                    vector_store = vector_stores[0]
-                    for vs in vector_stores[1:]:
-                        vector_store.merge_from(vs)
-            else:
-                if pdf_filename in self._vector_store_cache:
-                    vector_store = self._vector_store_cache[pdf_filename]
-                elif os.path.exists(vector_store_path):
-                    vector_store = FAISS.load_local(
-                        vector_store_path,
-                        self.embeddings,
-                        allow_dangerous_deserialization=True
-                    )
-                    self._vector_store_cache[pdf_filename] = vector_store
-
-            if vector_store:
-                logger.info(f"Standard Mode: Using enhanced Text RAG with reranking.")
-
-                # Get retrieval settings
-                initial_k = RETRIEVAL_CONFIG.get('initial_k', 10)
-                use_mmr = RETRIEVAL_CONFIG.get('use_mmr', True)
-                mmr_lambda = RETRIEVAL_CONFIG.get('mmr_lambda', 0.7)
-                reranker_top_k = RERANKER_CONFIG.get('top_k', 5)
-
-                # Retrieve initial documents using MMR
-                if use_mmr:
-                    retrieved_docs = vector_store.max_marginal_relevance_search(
-                        processed_query,
-                        k=initial_k,
-                        lambda_mult=mmr_lambda,
-                        fetch_k=initial_k * 2
-                    )
-                else:
-                    retrieved_docs = vector_store.similarity_search(processed_query, k=initial_k)
-
-                # Apply reranking for better relevance
-                if self.reranker and retrieved_docs:
-                    logger.info(f"Reranking {len(retrieved_docs)} documents...")
-                    retrieved_docs = self._rerank_documents(question, retrieved_docs, top_k=reranker_top_k)
-
-                source_docs = retrieved_docs
-
-                # Format context from reranked documents
-                context = self._extract_relevant_context(retrieved_docs, question)
-
-                # Build the full prompt
-                full_prompt = f"""You are a precise document analysis assistant. Answer the question based ONLY on the provided context.
-
-INSTRUCTIONS:
-1. Answer based STRICTLY on the context provided - do not use external knowledge.
-2. If the answer is clearly stated in the context, provide it accurately.
-3. If you cannot find the answer in the context, say "I cannot find this information in the document."
-4. Be specific and cite page numbers when available.
+CRITICAL INSTRUCTIONS:
+1. Read the context carefully and thoroughly before answering.
+2. Base your answer STRICTLY on the information in the context - do not add external knowledge.
+3. If the exact answer is in the context, quote or paraphrase it accurately.
+4. If the context contains partial information, provide what is available and note what's missing.
+5. If the answer is NOT in the context, respond: "I cannot find this information in the provided document."
+6. For numerical data, dates, or specific facts - be precise and cite the page number.
+7. If multiple pieces of context are relevant, synthesize them into a coherent answer.
 
 Previous conversation:
 {history_text}
@@ -538,11 +361,13 @@ Question: {question}
 
 Answer:"""
 
-                # Get response from LLM
-                response = self.llm.invoke(full_prompt, config={"callbacks": callbacks})
-                result_text = response.content if hasattr(response, "content") else str(response)
-            else:
-                result_text = "This PDF hasn't been processed yet. Please upload and process it first."
+        # Get response from LLM
+        try:
+            response = self.llm.invoke(prompt, config={"callbacks": callbacks})
+            result_text = response.content if hasattr(response, "content") else str(response)
+        except Exception as e:
+            logger.error(f"LLM invocation failed: {e}")
+            result_text = f"Error generating response: {str(e)}"
 
         end_time = time.time()
 
@@ -564,19 +389,27 @@ Answer:"""
             shutil.rmtree(vector_store_path)
             logger.info(f"Deleted vector store: {vector_store_path}")
 
-        # Also delete vision index if exists
-        vision_meta_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali_meta.pkl")
-        vision_index_path = os.path.join(VECTOR_STORE_DIR, f"{pdf_filename}_colpali.faiss")
-
-        if os.path.exists(vision_meta_path):
-            os.remove(vision_meta_path)
-            logger.info(f"Deleted vision metadata: {vision_meta_path}")
-
-        if os.path.exists(vision_index_path):
-            os.remove(vision_index_path)
-            logger.info(f"Deleted vision index: {vision_index_path}")
-
     def clear_cache(self):
         """Clear the vector store cache."""
         self._vector_store_cache.clear()
         logger.info("Vector store cache cleared")
+
+    def rebuild_index(self, pdf_file_path, use_vision=False):
+        """Force rebuild the vector store index for a PDF."""
+        vector_store_path = self._get_vector_store_path(pdf_file_path)
+        pdf_filename = os.path.basename(pdf_file_path)
+
+        if pdf_filename in self._vector_store_cache:
+            del self._vector_store_cache[pdf_filename]
+
+        if os.path.exists(vector_store_path):
+            shutil.rmtree(vector_store_path)
+            logger.info(f"Removed old index: {vector_store_path}")
+
+        self.ingest_pdf(pdf_file_path)
+        logger.info(f"Rebuilt index for: {pdf_filename}")
+
+    def is_pdf_indexed(self, pdf_file_path):
+        """Check if a PDF has been indexed."""
+        vector_store_path = self._get_vector_store_path(pdf_file_path)
+        return os.path.exists(vector_store_path)
