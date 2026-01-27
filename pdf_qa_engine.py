@@ -29,7 +29,7 @@ try:
     from config import RERANKER_CONFIG
 except (ImportError, KeyError):
     RERANKER_CONFIG = {
-        'enabled': True,
+        'enabled': False,
         'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2',
         'top_k': 5
     }
@@ -38,7 +38,7 @@ try:
     from config import RETRIEVAL_CONFIG
 except (ImportError, KeyError):
     RETRIEVAL_CONFIG = {
-        'initial_k': 10,
+        'initial_k': 5,
         'use_mmr': True,
         'mmr_lambda': 0.7,
         'score_threshold': 0.3
@@ -147,7 +147,7 @@ class PDFQAEngine:
                     metadata={"source": pdf_file_path, "page": 0}
                 )]
 
-            # Skip enhancing chunks with context to avoid slowing down embedding and text processing
+            # Enhance chunks with contextual information
             # chunks = self._enhance_chunks_with_context(chunks, pdf_file_path)
 
             logger.info(f"Created {len(chunks)} chunks from PDF")

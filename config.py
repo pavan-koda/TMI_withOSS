@@ -40,7 +40,7 @@ RERANKER_CONFIG = {
 # Retrieval Configuration
 RETRIEVAL_CONFIG = {
     # Number of chunks to initially retrieve (before reranking)
-    'initial_k': 8,
+    'initial_k': 5,
     # Use simple similarity search (more reliable)
     'use_mmr': False,
     # MMR diversity factor (0 = max relevance, 1 = max diversity)
