@@ -39,9 +39,13 @@ RERANKER_CONFIG = {
 
 # Retrieval Configuration
 RETRIEVAL_CONFIG = {
-    # Number of chunks to initially retrieve (before reranking)
-    'initial_k': 5,
-    # Use simple similarity search (more reliable)
+    # Number of chunks for specific questions (lower for speed)
+    'initial_k': 3,
+    # Number of chunks for summary questions (higher for context)
+    'summary_k': 15,
+    # Use MMR for summaries to get diverse chunks
+    'summary_use_mmr': True,
+    # Use simple similarity search for specific questions
     'use_mmr': False,
     # MMR diversity factor (0 = max relevance, 1 = max diversity)
     'mmr_lambda': 0.5,
