@@ -185,6 +185,7 @@ def render_chat_page():
 
             if role == "assistant" and "source_documents" in message:
                 with st.expander("📚 Reference Pages"):
+                    seen_pages = set()
                     for doc in message["source_documents"]:
                         # Handle metadata safely
                         metadata = doc.metadata if hasattr(doc, "metadata") else {}
@@ -193,7 +194,11 @@ def render_chat_page():
                         if isinstance(page, int):
                             page += 1
                         source = os.path.basename(metadata.get("source", "Unknown"))
-                        st.markdown(f"- **Page {page}** ({source})")
+                        
+                        page_key = f"{source}_{page}"
+                        if page_key not in seen_pages:
+                            st.markdown(f"- **Page {page}** ({source})")
+                            seen_pages.add(page_key)
 
     if prompt := st.chat_input(f"Ask a question about {active_pdf_name}...", max_chars=2000):
         current_time = datetime.now().strftime("%H:%M:%S")
@@ -243,13 +248,18 @@ def render_chat_page():
                 
                 if response["source_documents"]:
                     with st.expander("📚 Reference Pages"):
+                        seen_pages = set()
                         for doc in response["source_documents"]:
                             metadata = doc.metadata if hasattr(doc, "metadata") else {}
                             page = metadata.get("page", "Unknown")
                             if isinstance(page, int):
                                 page += 1
                             source = os.path.basename(metadata.get("source", "Unknown"))
-                            st.markdown(f"- **Page {page}** ({source})")
+                            
+                            page_key = f"{source}_{page}"
+                            if page_key not in seen_pages:
+                                st.markdown(f"- **Page {page}** ({source})")
+                                seen_pages.add(page_key)
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
