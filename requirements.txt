@@ -16,7 +16,12 @@ sentence-transformers>=2.2.2
 
 # PDF Processing
 pypdf>=3.17.0
+PyMuPDF>=1.23.0
 
 # Utilities
 python-dotenv==1.0.0
 requests==2.31.0
+
+# Optional: For better embeddings (will be auto-downloaded)
+# BAAI/bge-base-en-v1.5 - better semantic understanding
+# cross-encoder/ms-marco-MiniLM-L-6-v2 - for reranking
