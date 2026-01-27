@@ -289,23 +289,45 @@ class PDFQAEngine:
 
         logger.info("Answering question from PDF...")
 
-        # Get retrieval settings
-        initial_k = RETRIEVAL_CONFIG.get('initial_k', 8)
+        # Dynamic retrieval settings based on query type
+        is_summary_request = any(word in processed_query.lower() for word in ['summary', 'summarize', 'about', 'overview', 'tldr'])
+
+        if is_summary_request:
+            logger.info("Summary request detected. Using broader, diverse context.")
+            initial_k = RETRIEVAL_CONFIG.get('summary_k', 15)
+            use_mmr = RETRIEVAL_CONFIG.get('summary_use_mmr', True)
+        else:
+            initial_k = RETRIEVAL_CONFIG.get('initial_k', 3)
+            use_mmr = RETRIEVAL_CONFIG.get('use_mmr', False)
+
+        mmr_lambda = RETRIEVAL_CONFIG.get('mmr_lambda', 0.5)
         reranker_top_k = RERANKER_CONFIG.get('top_k', 5)
 
-        # Retrieve documents - use simple similarity search for reliability
+        def retrieve(query_text, k, use_mmr_flag):
+            if use_mmr_flag:
+                # Fetch more docs for MMR to select from, improving diversity
+                fetch_k = min(vector_store.index.ntotal, k * 5)
+                return vector_store.max_marginal_relevance_search(
+                    query_text, k=k, fetch_k=fetch_k, lambda_mult=mmr_lambda
+                )
+            else:
+                return vector_store.similarity_search(
+                    query_text, k=k, score_threshold=RETRIEVAL_CONFIG.get('score_threshold', 0.0)
+                )
+
+        # Retrieve documents
         retrieved_docs = []
         try:
-            logger.info(f"Searching for: {processed_query}")
-            retrieved_docs = vector_store.similarity_search(processed_query, k=initial_k)
+            logger.info(f"Searching for: '{processed_query}' (k={initial_k}, mmr={use_mmr})")
+            retrieved_docs = retrieve(processed_query, initial_k, use_mmr)
             logger.info(f"Found {len(retrieved_docs)} documents")
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
 
         if not retrieved_docs:
-            # Try with original question if processed query failed
             try:
-                retrieved_docs = vector_store.similarity_search(question, k=initial_k)
+                logger.info(f"Retrying search with original question: '{question}'")
+                retrieved_docs = retrieve(question, initial_k, use_mmr)
                 logger.info(f"Retry found {len(retrieved_docs)} documents")
             except Exception as e:
                 logger.error(f"Retry retrieval failed: {e}")
