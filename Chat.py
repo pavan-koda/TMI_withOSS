@@ -13,7 +13,7 @@ class StreamHandler(BaseCallbackHandler):
         self.text = initial_text
         self.token_count = 0
         self.message_context = message_context
-        self.update_interval = 1  # Update UI every N tokens for better performance
+        self.update_interval = 2  # Update UI every N tokens for better performance
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.text += token
