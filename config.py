@@ -24,31 +24,29 @@ QA_CONFIG = {
     'max_answer_length': 3000,
 }
 
-# Embedding Model Configuration - Using better model for semantic understanding
+# Embedding Model Configuration
 EMBEDDING_CONFIG = {
-    # Options: 'all-MiniLM-L6-v2' (fast), 'all-mpnet-base-v2' (better), 'BAAI/bge-base-en-v1.5' (best)
-    'model_name': 'BAAI/bge-base-en-v1.5',
+    # Using reliable model that works well
+    'model_name': 'all-MiniLM-L6-v2',
 }
 
-# Reranker Configuration for improved accuracy
+# Reranker Configuration (disabled for speed)
 RERANKER_CONFIG = {
-    'enabled': True,
-    # Cross-encoder model for reranking retrieved chunks
+    'enabled': False,
     'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2',
-    # Number of top results after reranking
     'top_k': 5,
 }
 
 # Retrieval Configuration
 RETRIEVAL_CONFIG = {
     # Number of chunks to initially retrieve (before reranking)
-    'initial_k': 10,
-    # Use Maximum Marginal Relevance for diverse results
-    'use_mmr': True,
+    'initial_k': 8,
+    # Use simple similarity search (more reliable)
+    'use_mmr': False,
     # MMR diversity factor (0 = max relevance, 1 = max diversity)
-    'mmr_lambda': 0.7,
+    'mmr_lambda': 0.5,
     # Minimum similarity score threshold
-    'score_threshold': 0.3,
+    'score_threshold': 0.0,
 }
 
 # Generator Model Configuration

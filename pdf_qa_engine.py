@@ -53,18 +53,14 @@ class PDFQAEngine:
     def __init__(self, model_name="mistral", base_url="http://localhost:11434"):
         self.llm = ChatOllama(model=model_name, base_url=base_url, streaming=True)
 
-        # Use better embedding model from config
-        embedding_model = EMBEDDING_CONFIG.get('model_name', 'BAAI/bge-base-en-v1.5')
+        # Use embedding model from config
+        embedding_model = EMBEDDING_CONFIG.get('model_name', 'all-MiniLM-L6-v2')
         logger.info(f"Loading embedding model: {embedding_model}")
 
         try:
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=embedding_model,
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
-            )
+            self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
         except Exception as e:
-            logger.warning(f"Failed to load {embedding_model}: {e}. Falling back to all-MiniLM-L6-v2")
+            logger.warning(f"Failed to load {embedding_model}: {e}")
             self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
         # Initialize cross-encoder reranker for improved accuracy
@@ -151,8 +147,8 @@ class PDFQAEngine:
                     metadata={"source": pdf_file_path, "page": 0}
                 )]
 
-            # Enhance chunks with contextual information
-            chunks = self._enhance_chunks_with_context(chunks, pdf_file_path)
+            # Skip enhancing chunks with context to avoid slowing down embedding and text processing
+            # chunks = self._enhance_chunks_with_context(chunks, pdf_file_path)
 
             logger.info(f"Created {len(chunks)} chunks from PDF")
 
@@ -185,16 +181,8 @@ class PDFQAEngine:
 
     def _preprocess_query(self, query):
         """Preprocess query for better matching."""
-        query = query.strip()
-
-        # Remove filler words that don't add semantic meaning
-        query = re.sub(r'\b(please|kindly|can you|could you|tell me|what is|what are)\b', '', query, flags=re.IGNORECASE)
-        query = query.strip()
-
-        if len(query.split()) <= 2:
-            return query
-
-        return query
+        # Just clean up whitespace, don't remove words
+        return query.strip()
 
     def _is_greeting(self, text):
         greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
@@ -215,8 +203,8 @@ class PDFQAEngine:
                 continue
             seen_content.add(content_hash)
 
-            page = doc.metadata.get('page', 'Unknown')
-            context_parts.append(f"[Page {page + 1 if isinstance(page, int) else page}]: {content}")
+            # Only append content, do not include page numbers in the context text passed to LLM
+            context_parts.append(f"{content}")
 
         return "\n\n---\n\n".join(context_parts)
 
@@ -270,7 +258,7 @@ class PDFQAEngine:
 
         if self._is_greeting(question):
             return {
-                "result": "Hello! How can I help you with your document today?",
+                "result": "Hello! I'm ready to help you with your document. You can ask me:\n\n- **Summary questions** - \"What is this document about?\"\n- **Specific details** - \"What are the key points?\"\n- **Search queries** - \"Find information about...\"\n\nWhat would you like to know?",
                 "response_time": 0.0,
                 "source_documents": []
             }
@@ -299,32 +287,32 @@ class PDFQAEngine:
                 "source_documents": []
             }
 
-        logger.info("Using enhanced Text RAG with reranking.")
+        logger.info("Answering question from PDF...")
 
         # Get retrieval settings
-        initial_k = RETRIEVAL_CONFIG.get('initial_k', 10)
-        use_mmr = RETRIEVAL_CONFIG.get('use_mmr', True)
-        mmr_lambda = RETRIEVAL_CONFIG.get('mmr_lambda', 0.7)
+        initial_k = RETRIEVAL_CONFIG.get('initial_k', 8)
         reranker_top_k = RERANKER_CONFIG.get('top_k', 5)
 
-        # Retrieve documents using MMR for diversity
+        # Retrieve documents - use simple similarity search for reliability
+        retrieved_docs = []
         try:
-            if use_mmr:
-                retrieved_docs = vector_store.max_marginal_relevance_search(
-                    processed_query,
-                    k=initial_k,
-                    lambda_mult=mmr_lambda,
-                    fetch_k=initial_k * 2
-                )
-            else:
-                retrieved_docs = vector_store.similarity_search(processed_query, k=initial_k)
+            logger.info(f"Searching for: {processed_query}")
+            retrieved_docs = vector_store.similarity_search(processed_query, k=initial_k)
+            logger.info(f"Found {len(retrieved_docs)} documents")
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
-            retrieved_docs = []
+
+        if not retrieved_docs:
+            # Try with original question if processed query failed
+            try:
+                retrieved_docs = vector_store.similarity_search(question, k=initial_k)
+                logger.info(f"Retry found {len(retrieved_docs)} documents")
+            except Exception as e:
+                logger.error(f"Retry retrieval failed: {e}")
 
         if not retrieved_docs:
             return {
-                "result": "I couldn't find relevant information in the document for your question.",
+                "result": "I couldn't find relevant information for your question. Please make sure the PDF has been indexed properly.",
                 "response_time": time.time() - start_time,
                 "source_documents": []
             }
@@ -340,26 +328,33 @@ class PDFQAEngine:
         context = self._extract_relevant_context(retrieved_docs, question)
 
         # Build the prompt
-        prompt = f"""You are a precise document analysis assistant. Answer the question based ONLY on the provided context.
+        prompt = f"""You are a helpful document assistant. Read the context carefully and answer the user's question.
 
-CRITICAL INSTRUCTIONS:
-1. Read the context carefully and thoroughly before answering.
-2. Base your answer STRICTLY on the information in the context - do not add external knowledge.
-3. If the exact answer is in the context, quote or paraphrase it accurately.
-4. If the context contains partial information, provide what is available and note what's missing.
-5. If the answer is NOT in the context, respond: "I cannot find this information in the provided document."
-6. For numerical data, dates, or specific facts - be precise and cite the page number.
-7. If multiple pieces of context are relevant, synthesize them into a coherent answer.
+RULES:
+1. ONLY use information from the context below - never make up information
+2. Give clear, direct answers - get to the point quickly
+3. Use bullet points for multiple items
+4. Include specific details like numbers, dates, names when available
+5. If the answer has multiple parts, organize them clearly
+6. If information is NOT in the context, say: "This information is not available in the document."
+7. DO NOT mention page numbers or source documents in the text of your answer.
+
+FORMAT YOUR RESPONSE:
+- Keep answers concise but complete
+- Use short paragraphs (2-3 sentences max)
+- For lists, use bullet points
+- Bold **key terms** if helpful
+ - Do NOT include citations or page references in the text.
 
 Previous conversation:
 {history_text}
 
-Context from document:
+DOCUMENT CONTEXT:
 {context}
 
-Question: {question}
+USER QUESTION: {question}
 
-Answer:"""
+ANSWER:"""
 
         # Get response from LLM
         try:
