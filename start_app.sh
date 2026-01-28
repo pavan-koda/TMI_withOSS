@@ -27,6 +27,19 @@ pip install -r requirements.txt --quiet
 echo "Installing ColPali..."
 pip install colpali-engine --quiet
 
+# Pre-download embedding model to cache (avoids timeout during app startup)
+echo "Checking embedding model cache..."
+python3 -c "
+from sentence_transformers import SentenceTransformer
+import os
+os.makedirs('./model_cache', exist_ok=True)
+try:
+    model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder='./model_cache')
+    print('Embedding model ready.')
+except Exception as e:
+    print(f'Warning: Could not cache embedding model: {e}')
+" 2>/dev/null || echo "Embedding model will be downloaded on first use."
+
 # Check Ollama
 if ! command -v ollama &> /dev/null; then
     echo "WARNING: Ollama is not installed or not in PATH."

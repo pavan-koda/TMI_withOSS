@@ -389,14 +389,34 @@ class PDFQAEngine:
             raise RuntimeError("No LLM backend available")
 
     def _init_embeddings(self):
-        """Initialize embeddings with fallback"""
+        """Initialize embeddings with offline mode support"""
         model_name = EMBEDDING_CONFIG.get('model_name', 'all-MiniLM-L6-v2')
+
+        # Model kwargs for better performance and offline support
+        model_kwargs = {'device': 'cpu'}
+        encode_kwargs = {'normalize_embeddings': True}
+
+        # Try local/cached first, then online
         try:
-            self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+            # First try with local_files_only to use cached model
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=model_name,
+                model_kwargs=model_kwargs,
+                encode_kwargs=encode_kwargs,
+                cache_folder="./model_cache"
+            )
             logger.info(f"Loaded embeddings: {model_name}")
         except Exception as e:
             logger.warning(f"Failed to load {model_name}: {e}")
-            self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            # Fallback with simpler config
+            try:
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name="all-MiniLM-L6-v2",
+                    cache_folder="./model_cache"
+                )
+            except Exception as e2:
+                logger.error(f"Embedding initialization failed: {e2}")
+                raise RuntimeError(f"Cannot initialize embeddings. Check internet connection or cache: {e2}")
 
     def _init_reranker(self):
         """Initialize reranker if available"""
