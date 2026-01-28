@@ -220,9 +220,10 @@ class QueryUnderstanding:
         # Handle follow-up queries by adding context
         if intent == QueryIntent.FOLLOW_UP and context:
             # For very short queries like "more", "continue", "details" - use previous topic directly
-            short_followups = ['more', 'continue', 'go on', 'details', 'explain', 'tell', 'next']
+            short_followups = ['more', 'continue', 'go on', 'details', 'explain', 'tell', 'next', 'yes', 'ok']
             if query_lower in short_followups and context.current_focus:
-                reformulated = f"more information about {context.current_focus}"
+                # Use the topic directly for better search results
+                reformulated = context.current_focus
                 return reformulated
 
             # Replace pronouns with actual references
@@ -289,18 +290,18 @@ class QueryUnderstanding:
 class PromptBuilder:
     """Builds concise prompts optimized for speed"""
 
-    # SPEED: Shorter, more direct prompts
+    # Dynamic prompts - paragraph format by default, list only when asked
     FAST_PROMPTS = {
-        QueryIntent.SUMMARY: "Summarize the key points concisely using bullets.",
-        QueryIntent.SPECIFIC_QUESTION: "Answer directly and concisely.",
-        QueryIntent.COMPARISON: "Compare briefly with key differences.",
-        QueryIntent.LIST_REQUEST: "List the items concisely.",
-        QueryIntent.DEFINITION: "Define clearly in 1-2 sentences.",
-        QueryIntent.HOW_TO: "Explain the steps briefly.",
-        QueryIntent.WHY: "Explain the reason concisely.",
-        QueryIntent.EXPLANATION: "Explain clearly and briefly.",
-        QueryIntent.YES_NO: "Answer yes/no, then briefly explain.",
-        QueryIntent.FOLLOW_UP: "Continue from the previous answer.",
+        QueryIntent.SUMMARY: "Summarize in a short paragraph.",
+        QueryIntent.SPECIFIC_QUESTION: "Answer directly in 1-3 sentences.",
+        QueryIntent.COMPARISON: "Compare briefly in a paragraph.",
+        QueryIntent.LIST_REQUEST: "List the items.",  # Only this uses list format
+        QueryIntent.DEFINITION: "Define in 1-2 sentences.",
+        QueryIntent.HOW_TO: "Explain briefly.",
+        QueryIntent.WHY: "Explain the reason briefly.",
+        QueryIntent.EXPLANATION: "Explain in a short paragraph.",
+        QueryIntent.YES_NO: "Answer yes/no with brief reason.",
+        QueryIntent.FOLLOW_UP: "Add more relevant details.",
     }
 
     @staticmethod
@@ -318,11 +319,18 @@ class PromptBuilder:
         # Build topic context for follow-ups
         topic_hint = ""
         if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.current_focus:
-            topic_hint = f" (Topic: {conversation_context.current_focus})"
+            topic_hint = f" about {conversation_context.current_focus}"
 
-        # SPEED: Short prompt for faster response
-        prompt = f"""Answer ONLY from the context below. If not found, say "Not in document."{topic_hint}
-{task}
+        # SPEED: Short prompt with strict relevance
+        prompt = f"""Answer{topic_hint} using ONLY the context below.
+
+RULES:
+- Include ONLY information directly related to the question
+- Do NOT mention unrelated topics from context
+- Do NOT say "not mentioned" or "not provided" for unrelated things
+- Keep response natural and conversational
+- {task}
+- If nothing relevant found, say "Not in document."
 
 Context:
 {context_text}
@@ -743,15 +751,23 @@ What would you like to know?"""
 
         # Reformulate query for better retrieval
         search_query = QueryUnderstanding.reformulate_query(question, conv_context, intent)
-        logger.info(f"Search query: {search_query}")
+        logger.info(f"Original: {question} | Reformulated: {search_query} | Focus: {conv_context.current_focus}")
 
         # Retrieve documents
         retrieved_docs = self._retrieve_documents(search_query, vector_store, intent)
 
-        # If follow-up with no results, try original context
-        if not retrieved_docs and intent == QueryIntent.FOLLOW_UP and conv_context.last_query:
-            logger.info("Retrying with previous query context")
-            retrieved_docs = self._retrieve_documents(conv_context.last_query, vector_store, QueryIntent.SPECIFIC_QUESTION)
+        # For follow-ups: try multiple strategies if no results
+        if intent == QueryIntent.FOLLOW_UP and (not retrieved_docs or len(retrieved_docs) < 2):
+            # Try using just the topic
+            if conv_context.current_focus:
+                logger.info(f"Retrying with topic: {conv_context.current_focus}")
+                topic_docs = self._retrieve_documents(conv_context.current_focus, vector_store, QueryIntent.SPECIFIC_QUESTION)
+                if topic_docs:
+                    retrieved_docs = topic_docs
+            # Try previous query
+            if not retrieved_docs and conv_context.last_query:
+                logger.info(f"Retrying with previous query: {conv_context.last_query}")
+                retrieved_docs = self._retrieve_documents(conv_context.last_query, vector_store, QueryIntent.SPECIFIC_QUESTION)
 
         if not retrieved_docs:
             response = self._handle_no_results(question, intent)
