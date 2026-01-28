@@ -145,15 +145,11 @@ class QueryUnderstanding:
 
     WHY_KEYWORDS = ['why', 'reason', 'cause', 'because', 'purpose of', 'motivation']
 
+    # Patterns for longer follow-up queries (short queries auto-detected by word count)
     FOLLOW_UP_PATTERNS = [
-        r'^(and|also|what about|how about|tell me more|more about|elaborate|explain more)',
-        r'^(can you|could you|please)\s*(explain|elaborate|tell|give)',
-        r'\b(this|that|it|they|these|those|the same)\b',
-        r'^(yes|no|ok|okay|sure|right|exactly|correct)',
-        r'^(more|continue|go on|details|explain|tell|next)$',  # Single word follow-ups
-        r'^(him|her|he|she|his|hers|about him|about her|about it)$',  # Pronoun queries
-        r'^(to|from|until|till|between|when|where|who|why|how)\??$',  # Conversational short queries
-        r'^\d+\s*(to|from|until)\??$',  # Like "1914 to?"
+        r'^(and|also|what about|how about|tell me more|elaborate|explain more)',
+        r'^(can you|could you|please)\s*(explain|elaborate|tell)',
+        r'\b(this|that|it|they|him|her|he|she)\b',  # Pronouns
     ]
 
     @classmethod
@@ -166,8 +162,14 @@ class QueryUnderstanding:
             if re.match(pattern, query_lower, re.IGNORECASE):
                 return QueryIntent.GREETING
 
-        # Check for follow-up (context-dependent)
+        # SMART FOLLOW-UP DETECTION: Any short query after conversation is likely a follow-up
         if context and context.turn_count > 0:
+            # Short queries (< 5 words) are almost always follow-ups
+            word_count = len(query.split())
+            if word_count <= 4:
+                return QueryIntent.FOLLOW_UP
+
+            # Pattern-based follow-up detection for longer queries
             for pattern in cls.FOLLOW_UP_PATTERNS:
                 if re.search(pattern, query_lower):
                     return QueryIntent.FOLLOW_UP
@@ -215,57 +217,32 @@ class QueryUnderstanding:
 
     @classmethod
     def reformulate_query(cls, query: str, context: ConversationContext = None, intent: QueryIntent = None) -> str:
-        """Reformulate query for better retrieval"""
+        """Reformulate query for better retrieval - AUTOMATIC context handling"""
         reformulated = query.strip()
         query_lower = reformulated.lower()
 
-        # Handle follow-up queries by adding context
-        if intent == QueryIntent.FOLLOW_UP and context:
-            # For very short queries like "more", "continue", "details" - use previous topic directly
-            short_followups = ['more', 'continue', 'go on', 'details', 'explain', 'tell', 'next', 'yes', 'ok']
-            if query_lower in short_followups and context.current_focus:
-                # Use the topic directly for better search results
-                reformulated = context.current_focus
-                return reformulated
+        # AUTOMATIC: For any follow-up, always combine with previous topic
+        if intent == QueryIntent.FOLLOW_UP and context and context.current_focus:
+            word_count = len(query.split())
 
-            # Conversational continuations like "to?", "when?", "until?"
-            conversational = ['to', 'to?', 'from', 'from?', 'until', 'until?', 'till', 'till?', 'when', 'when?', 'where', 'where?', 'who', 'who?', 'why', 'why?', 'how', 'how?']
-            if query_lower in conversational and context.current_focus:
-                # Combine with previous topic for context
+            # Very short (1-2 words): use topic directly or combine
+            if word_count <= 2:
+                # Single word like "more", "to?", "when?" etc
                 reformulated = f"{context.current_focus} {query.strip('?')}"
                 return reformulated
 
-            # Handle patterns like "1914 to?"
-            if re.match(r'^\d+\s*(to|from|until)\??$', query_lower) and context.current_focus:
-                reformulated = f"{context.current_focus} end date"
+            # Short (3-4 words): append topic if not already present
+            if word_count <= 4:
+                if context.current_focus.lower() not in query_lower:
+                    reformulated = f"{query} {context.current_focus}"
                 return reformulated
 
-            # Replace pronouns with actual references
-            pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'the same', 'him', 'her', 'he', 'she', 'his', 'hers']
-
+            # Replace pronouns in longer queries
+            pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'him', 'her', 'he', 'she']
             for pronoun in pronouns:
-                if f" {pronoun} " in f" {query_lower} " or query_lower.startswith(f"{pronoun} ") or query_lower == pronoun:
-                    if context.current_focus:
-                        if query_lower == pronoun:
-                            reformulated = f"more about {context.current_focus}"
-                        else:
-                            reformulated = re.sub(
-                                rf'\b{pronoun}\b',
-                                context.current_focus,
-                                reformulated,
-                                flags=re.IGNORECASE
-                            )
-                        break
-
-            # If query is still short, add context from current focus or last query
-            if len(reformulated.split()) < 3:
-                if context.current_focus:
-                    reformulated = f"{reformulated} {context.current_focus}"
-                elif context.last_query:
-                    last_terms = [w for w in context.last_query.split()
-                                 if len(w) > 2 and w.lower() not in ['what', 'where', 'when', 'how', 'why', 'the', 'and', 'for', 'is', 'are']]
-                    if last_terms:
-                        reformulated = f"{reformulated} {' '.join(last_terms[:2])}"
+                if re.search(rf'\b{pronoun}\b', query_lower):
+                    reformulated = re.sub(rf'\b{pronoun}\b', context.current_focus, reformulated, flags=re.IGNORECASE)
+                    break
 
         # For definition queries, ensure the term is clear
         if intent == QueryIntent.DEFINITION:
