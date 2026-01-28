@@ -321,7 +321,7 @@ class QueryUnderstanding:
 
 
 class PromptBuilder:
-    """Intelligent prompt builder for natural, accurate responses"""
+    """Simple prompt builder - let LLM handle conversation context"""
 
     @staticmethod
     def build_prompt(
@@ -331,46 +331,31 @@ class PromptBuilder:
         intent: QueryIntent,
         conversation_context: ConversationContext = None
     ) -> str:
-        """Build intelligent prompt based on intent and context"""
+        """Build prompt with conversation history - LLM handles context naturally"""
 
-        # Conversation context for follow-ups
-        conv_info = ""
+        # Include previous Q&A for conversation continuity
+        prev_qa = ""
         if conversation_context and conversation_context.turn_count > 0:
-            if conversation_context.current_focus:
-                conv_info = f"Topic: {conversation_context.current_focus}. "
-            if conversation_context.last_response and intent == QueryIntent.FOLLOW_UP:
-                conv_info += f"Previous: {conversation_context.last_response[:150]}..."
+            if conversation_context.last_query and conversation_context.last_response:
+                prev_qa = f"""
+PREVIOUS CONVERSATION:
+Q: {conversation_context.last_query}
+A: {conversation_context.last_response[:300]}
+"""
 
-        # Intent-specific instructions
-        intent_instructions = {
-            QueryIntent.SUMMARY: "Give a brief summary in 2-3 sentences.",
-            QueryIntent.SPECIFIC_QUESTION: "Answer directly and concisely.",
-            QueryIntent.COMPARISON: "Compare the key differences briefly.",
-            QueryIntent.LIST_REQUEST: "List the items clearly.",
-            QueryIntent.DEFINITION: "Define clearly in 1-2 sentences.",
-            QueryIntent.HOW_TO: "Explain the steps concisely.",
-            QueryIntent.WHY: "Explain the reason briefly.",
-            QueryIntent.EXPLANATION: "Explain clearly in a short paragraph.",
-            QueryIntent.YES_NO: "Answer yes or no, then explain briefly.",
-            QueryIntent.FOLLOW_UP: "Continue naturally from the previous answer.",
-        }
-
-        instruction = intent_instructions.get(intent, "Answer concisely.")
-
-        # Build the prompt
-        prompt = f"""You are answering questions about a document. {conv_info}
-
-INSTRUCTIONS:
-- Use ONLY the information from the context below
-- {instruction}
-- Be natural and conversational
-- If the information is not in the context, say "This is not covered in the document."
-- Do NOT make up facts or use external knowledge
-
-CONTEXT:
+        # Simple prompt - let LLM figure out context
+        prompt = f"""Answer questions about a document. Use ONLY the context provided.
+{prev_qa}
+CONTEXT FROM DOCUMENT:
 {context_text}
 
-QUESTION: {question}
+CURRENT QUESTION: {question}
+
+RULES:
+- If the question is a follow-up (like "to?", "more", "when?"), understand it from previous conversation
+- Answer naturally and concisely
+- If not in document, say "Not covered in the document."
+- Do NOT make up facts
 
 ANSWER:"""
 
