@@ -152,6 +152,8 @@ class QueryUnderstanding:
         r'^(yes|no|ok|okay|sure|right|exactly|correct)',
         r'^(more|continue|go on|details|explain|tell|next)$',  # Single word follow-ups
         r'^(him|her|he|she|his|hers|about him|about her|about it)$',  # Pronoun queries
+        r'^(to|from|until|till|between|when|where|who|why|how)\??$',  # Conversational short queries
+        r'^\d+\s*(to|from|until)\??$',  # Like "1914 to?"
     ]
 
     @classmethod
@@ -224,6 +226,18 @@ class QueryUnderstanding:
             if query_lower in short_followups and context.current_focus:
                 # Use the topic directly for better search results
                 reformulated = context.current_focus
+                return reformulated
+
+            # Conversational continuations like "to?", "when?", "until?"
+            conversational = ['to', 'to?', 'from', 'from?', 'until', 'until?', 'till', 'till?', 'when', 'when?', 'where', 'where?', 'who', 'who?', 'why', 'why?', 'how', 'how?']
+            if query_lower in conversational and context.current_focus:
+                # Combine with previous topic for context
+                reformulated = f"{context.current_focus} {query.strip('?')}"
+                return reformulated
+
+            # Handle patterns like "1914 to?"
+            if re.match(r'^\d+\s*(to|from|until)\??$', query_lower) and context.current_focus:
+                reformulated = f"{context.current_focus} end date"
                 return reformulated
 
             # Replace pronouns with actual references
@@ -318,16 +332,19 @@ class PromptBuilder:
 
         # Build topic context for follow-ups
         topic_hint = ""
-        if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.current_focus:
-            topic_hint = f" about {conversation_context.current_focus}"
+        prev_context = ""
+        if intent == QueryIntent.FOLLOW_UP and conversation_context:
+            if conversation_context.current_focus:
+                topic_hint = f" about {conversation_context.current_focus}"
+            if conversation_context.last_response:
+                prev_context = f"\nPrevious answer: {conversation_context.last_response[:200]}\n"
 
         # SPEED: Short prompt with strict relevance
         prompt = f"""Answer{topic_hint} using ONLY the context below.
-
+{prev_context}
 RULES:
 - Include ONLY information directly related to the question
-- Do NOT mention unrelated topics from context
-- Do NOT say "not mentioned" or "not provided" for unrelated things
+- For follow-up questions like "to?", "when?", understand from previous context
 - Keep response natural and conversational
 - {task}
 - If nothing relevant found, say "Not in document."
