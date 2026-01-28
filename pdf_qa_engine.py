@@ -90,17 +90,22 @@ class ConversationContext:
         self.last_response = response[:300]  # SPEED: Truncate stored response
         self.last_intent = intent
         self.turn_count += 1
-        # Extract focus: prioritize capitalized words/acronyms, then longer words
-        words = query.split()
-        # First look for capitalized words or acronyms (like NTR, Ambedkar)
-        caps = [w.strip('.,!?') for w in words if w[0].isupper() and len(w) >= 2]
-        if caps:
-            self.current_focus = caps[0]
-        else:
-            # Fallback to longer words
-            long_words = [w for w in words if len(w) > 4]
-            if long_words:
-                self.current_focus = long_words[0]
+
+        # Extract focus from query - find the main topic
+        words = query.strip().split()
+        stopwords = {'what', 'who', 'where', 'when', 'how', 'why', 'is', 'are', 'the', 'a', 'an', 'about', 'tell', 'me', 'more'}
+
+        # Filter out stopwords and punctuation
+        content_words = [w.strip('.,!?') for w in words if w.lower().strip('.,!?') not in stopwords and len(w.strip('.,!?')) >= 2]
+
+        if content_words:
+            # Use the first meaningful word as focus (preserve case for proper nouns)
+            self.current_focus = content_words[0]
+        elif words:
+            # Fallback: use the query itself if short enough
+            clean_query = query.strip().strip('.,!?')
+            if len(clean_query) <= 20:
+                self.current_focus = clean_query
 
 
 @dataclass
