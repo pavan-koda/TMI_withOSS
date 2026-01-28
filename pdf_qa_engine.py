@@ -90,10 +90,17 @@ class ConversationContext:
         self.last_response = response[:300]  # SPEED: Truncate stored response
         self.last_intent = intent
         self.turn_count += 1
-        # SPEED: Simple focus extraction from query
-        words = [w for w in query.split() if len(w) > 4]
-        if words:
-            self.current_focus = words[0]
+        # Extract focus: prioritize capitalized words/acronyms, then longer words
+        words = query.split()
+        # First look for capitalized words or acronyms (like NTR, Ambedkar)
+        caps = [w.strip('.,!?') for w in words if w[0].isupper() and len(w) >= 2]
+        if caps:
+            self.current_focus = caps[0]
+        else:
+            # Fallback to longer words
+            long_words = [w for w in words if len(w) > 4]
+            if long_words:
+                self.current_focus = long_words[0]
 
 
 @dataclass
@@ -205,7 +212,7 @@ class QueryUnderstanding:
         # Handle follow-up queries by adding context
         if intent == QueryIntent.FOLLOW_UP and context:
             # Replace pronouns with actual references
-            pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'the same']
+            pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'the same', 'him', 'her', 'he', 'she', 'his', 'hers']
             query_lower = reformulated.lower()
 
             for pronoun in pronouns:
@@ -296,13 +303,19 @@ class PromptBuilder:
 
         task = PromptBuilder.FAST_PROMPTS.get(intent, "Answer concisely.")
 
+        # Build topic context for follow-ups
+        topic_info = ""
+        if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.current_focus:
+            topic_info = f"\nCurrent topic: {conversation_context.current_focus}. Continue answering about this topic.\n"
+
         # SPEED: Minimal prompt structure with strict PDF-only constraint
         prompt = f"""You are a PDF document assistant. Answer ONLY based on the context below.
 
 IMPORTANT RULES:
-- Only use information from the provided context
-- If the answer is NOT in the context, respond EXACTLY with: "I cannot find this information in the uploaded PDF document. Please ask questions related to the document content."
-- Do NOT use any external knowledge or make assumptions
+- ONLY use information from the provided context below
+- If the answer is NOT found in the context, say: "I cannot find this information in the uploaded PDF document."
+- Do NOT use external knowledge, do NOT add facts not in the context
+- Do NOT make up information{topic_info}
 - Be concise. {task}
 
 Context from PDF:
@@ -311,12 +324,6 @@ Context from PDF:
 Question: {question}
 
 Answer:"""
-
-        # Add minimal history for follow-ups only
-        if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.last_query:
-            prompt = f"""Previous: {conversation_context.last_query[:100]}
-
-{prompt}"""
 
         return prompt
 
