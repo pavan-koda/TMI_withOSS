@@ -46,9 +46,9 @@ except ImportError:
     RERANKER_CONFIG = {'enabled': False, 'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2', 'top_k': 5}
     RETRIEVAL_CONFIG = {'initial_k': 3, 'summary_k': 8, 'use_mmr': False, 'mmr_lambda': 0.5}
 
-# Speed optimization constants
-MAX_CONTEXT_LENGTH = 3000  # Limit context to reduce LLM processing time
-MAX_CHUNK_LENGTH = 500  # Truncate individual chunks
+# Speed optimization constants - reduced for faster responses
+MAX_CONTEXT_LENGTH = 2000  # Reduced for faster LLM processing
+MAX_CHUNK_LENGTH = 400  # Shorter chunks
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,8 @@ class QueryUnderstanding:
         r'^(can you|could you|please)\s*(explain|elaborate|tell|give)',
         r'\b(this|that|it|they|these|those|the same)\b',
         r'^(yes|no|ok|okay|sure|right|exactly|correct)',
+        r'^(more|continue|go on|details|explain|tell|next)$',  # Single word follow-ups
+        r'^(him|her|he|she|his|hers|about him|about her|about it)$',  # Pronoun queries
     ]
 
     @classmethod
@@ -208,37 +210,42 @@ class QueryUnderstanding:
     def reformulate_query(cls, query: str, context: ConversationContext = None, intent: QueryIntent = None) -> str:
         """Reformulate query for better retrieval"""
         reformulated = query.strip()
+        query_lower = reformulated.lower()
 
         # Handle follow-up queries by adding context
         if intent == QueryIntent.FOLLOW_UP and context:
+            # For very short queries like "more", "continue", "details" - use previous topic directly
+            short_followups = ['more', 'continue', 'go on', 'details', 'explain', 'tell', 'next']
+            if query_lower in short_followups and context.current_focus:
+                reformulated = f"more information about {context.current_focus}"
+                return reformulated
+
             # Replace pronouns with actual references
             pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'the same', 'him', 'her', 'he', 'she', 'his', 'hers']
-            query_lower = reformulated.lower()
 
             for pronoun in pronouns:
-                if f" {pronoun} " in f" {query_lower} " or query_lower.startswith(f"{pronoun} "):
+                if f" {pronoun} " in f" {query_lower} " or query_lower.startswith(f"{pronoun} ") or query_lower == pronoun:
                     if context.current_focus:
-                        reformulated = re.sub(
-                            rf'\b{pronoun}\b',
-                            context.current_focus,
-                            reformulated,
-                            flags=re.IGNORECASE
-                        )
-                    elif context.mentioned_entities:
-                        reformulated = re.sub(
-                            rf'\b{pronoun}\b',
-                            context.mentioned_entities[-1],
-                            reformulated,
-                            flags=re.IGNORECASE
-                        )
+                        if query_lower == pronoun:
+                            reformulated = f"more about {context.current_focus}"
+                        else:
+                            reformulated = re.sub(
+                                rf'\b{pronoun}\b',
+                                context.current_focus,
+                                reformulated,
+                                flags=re.IGNORECASE
+                            )
+                        break
 
-            # If query is too short, add context from last query
-            if len(reformulated.split()) < 4 and context.last_query:
-                # Extract key terms from last query
-                last_terms = [w for w in context.last_query.split()
-                             if len(w) > 3 and w.lower() not in ['what', 'where', 'when', 'how', 'why', 'the', 'and', 'for']]
-                if last_terms:
-                    reformulated = f"{reformulated} regarding {' '.join(last_terms[:3])}"
+            # If query is still short, add context from current focus or last query
+            if len(reformulated.split()) < 3:
+                if context.current_focus:
+                    reformulated = f"{reformulated} {context.current_focus}"
+                elif context.last_query:
+                    last_terms = [w for w in context.last_query.split()
+                                 if len(w) > 2 and w.lower() not in ['what', 'where', 'when', 'how', 'why', 'the', 'and', 'for', 'is', 'are']]
+                    if last_terms:
+                        reformulated = f"{reformulated} {' '.join(last_terms[:2])}"
 
         # For definition queries, ensure the term is clear
         if intent == QueryIntent.DEFINITION:
@@ -304,26 +311,19 @@ class PromptBuilder:
         task = PromptBuilder.FAST_PROMPTS.get(intent, "Answer concisely.")
 
         # Build topic context for follow-ups
-        topic_info = ""
+        topic_hint = ""
         if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.current_focus:
-            topic_info = f"\nCurrent topic: {conversation_context.current_focus}. Continue answering about this topic.\n"
+            topic_hint = f" (Topic: {conversation_context.current_focus})"
 
-        # SPEED: Minimal prompt structure with strict PDF-only constraint
-        prompt = f"""You are a PDF document assistant. Answer ONLY based on the context below.
+        # SPEED: Short prompt for faster response
+        prompt = f"""Answer ONLY from the context below. If not found, say "Not in document."{topic_hint}
+{task}
 
-IMPORTANT RULES:
-- ONLY use information from the provided context below
-- If the answer is NOT found in the context, say: "I cannot find this information in the uploaded PDF document."
-- Do NOT use external knowledge, do NOT add facts not in the context
-- Do NOT make up information{topic_info}
-- Be concise. {task}
-
-Context from PDF:
+Context:
 {context_text}
 
-Question: {question}
-
-Answer:"""
+Q: {question}
+A:"""
 
         return prompt
 
