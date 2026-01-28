@@ -1,9 +1,10 @@
-# PDF Chat Application with Mistral 7B (Ollama) + Streamlit
+# TMI AI Assistant - PDF Q&A System
+# Robust multi-provider LLM support with streaming
 
 # Core UI
 streamlit>=1.30.0
 
-# Langchain & AI
+# LangChain & AI
 langchain>=0.1.0
 langchain-community>=0.0.10
 langchain-core>=0.1.0
@@ -19,9 +20,14 @@ pypdf>=3.17.0
 PyMuPDF>=1.23.0
 
 # Utilities
-python-dotenv==1.0.0
-requests==2.31.0
+python-dotenv>=1.0.0
+requests>=2.31.0
 
-# Optional: For better embeddings (will be auto-downloaded)
-# BAAI/bge-base-en-v1.5 - better semantic understanding
-# cross-encoder/ms-marco-MiniLM-L-6-v2 - for reranking
+# Optional LLM Providers (uncomment as needed)
+# openai>=1.0.0           # For OpenAI GPT models
+# groq>=0.4.0             # For Groq ultra-fast inference
+# anthropic>=0.18.0       # For Anthropic Claude models
+
+# Development
+# pytest>=7.0.0
+# black>=23.0.0
