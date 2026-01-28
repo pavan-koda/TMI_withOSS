@@ -333,29 +333,30 @@ class PromptBuilder:
     ) -> str:
         """Build prompt with conversation history - LLM handles context naturally"""
 
-        # Include previous Q&A for conversation continuity
+        # ONLY include previous Q&A for follow-up questions
         prev_qa = ""
-        if conversation_context and conversation_context.turn_count > 0:
+        if intent == QueryIntent.FOLLOW_UP and conversation_context and conversation_context.turn_count > 0:
             if conversation_context.last_query and conversation_context.last_response:
                 prev_qa = f"""
-PREVIOUS CONVERSATION:
+PREVIOUS Q&A (for context):
 Q: {conversation_context.last_query}
 A: {conversation_context.last_response[:300]}
 """
 
-        # Simple prompt - let LLM figure out context
-        prompt = f"""Answer questions about a document. Use ONLY the context provided.
+        # Strict prompt - ONLY from document, no external knowledge
+        prompt = f"""You are a document Q&A assistant. Answer ONLY from the provided context.
 {prev_qa}
-CONTEXT FROM DOCUMENT:
+DOCUMENT CONTEXT:
 {context_text}
 
-CURRENT QUESTION: {question}
+QUESTION: {question}
 
-RULES:
-- If the question is a follow-up (like "to?", "more", "when?"), understand it from previous conversation
-- Answer naturally and concisely
-- If not in document, say "Not covered in the document."
-- Do NOT make up facts
+STRICT RULES:
+1. Answer ONLY using information from DOCUMENT CONTEXT above
+2. If the answer is NOT in the document, say ONLY: "Not covered in the document."
+3. NEVER add external knowledge or facts not in the context
+4. If this is a follow-up (like "to?", "more"), use PREVIOUS Q&A for understanding
+5. Be concise
 
 ANSWER:"""
 
