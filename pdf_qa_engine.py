@@ -296,10 +296,16 @@ class PromptBuilder:
 
         task = PromptBuilder.FAST_PROMPTS.get(intent, "Answer concisely.")
 
-        # SPEED: Minimal prompt structure
-        prompt = f"""Answer based ONLY on the context below. Be concise. {task}
+        # SPEED: Minimal prompt structure with strict PDF-only constraint
+        prompt = f"""You are a PDF document assistant. Answer ONLY based on the context below.
 
-Context:
+IMPORTANT RULES:
+- Only use information from the provided context
+- If the answer is NOT in the context, respond EXACTLY with: "I cannot find this information in the uploaded PDF document. Please ask questions related to the document content."
+- Do NOT use any external knowledge or make assumptions
+- Be concise. {task}
+
+Context from PDF:
 {context_text}
 
 Question: {question}
