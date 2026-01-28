@@ -94,17 +94,36 @@ class ConversationContext:
                  'then', 'than', 'this', 'that', 'these', 'those', 'it', 'its', 'i', 'my'}
 
     def extract_topics(self, text: str) -> List[str]:
-        """Extract meaningful topics from text"""
+        """Extract meaningful topics - includes phrases, not just single words"""
         words = text.strip().split()
         topics = []
 
+        # First, try to extract meaningful phrases (2-3 consecutive non-stopwords)
+        phrase_words = []
         for word in words:
             clean = word.strip('.,!?()[]"\'').lower()
-            # Keep if: not stopword, length >= 2, contains letters
+            if clean not in self.STOPWORDS and len(clean) >= 2 and any(c.isalpha() for c in clean):
+                phrase_words.append(word.strip('.,!?()"\''))
+            else:
+                # End of phrase - save if we have 2+ words
+                if len(phrase_words) >= 2:
+                    phrase = ' '.join(phrase_words)
+                    if phrase not in topics:
+                        topics.append(phrase)
+                phrase_words = []
+
+        # Save any remaining phrase
+        if len(phrase_words) >= 2:
+            phrase = ' '.join(phrase_words)
+            if phrase not in topics:
+                topics.append(phrase)
+
+        # Also add individual meaningful words
+        for word in words:
+            clean = word.strip('.,!?()[]"\'').lower()
             if (clean not in self.STOPWORDS and
-                len(clean) >= 2 and
+                len(clean) >= 3 and  # Slightly longer for single words
                 any(c.isalpha() for c in clean)):
-                # Preserve original case for proper nouns
                 original = word.strip('.,!?()"\'')
                 if original not in topics:
                     topics.append(original)
@@ -243,12 +262,22 @@ class QueryUnderstanding:
 
         # SMART REFORMULATION based on query length and type
         if word_count == 1:
-            # Single word: "more", "yes", "to?", "when?" etc
-            word = original.strip('?!.,')
-            if word.lower() in ['more', 'yes', 'ok', 'continue', 'next', 'details']:
-                return topic  # Just search for the topic
-            else:
-                return f"{topic} {word}"  # "world war to"
+            word = original.strip('?!.,').lower()
+
+            # Simple continuation words - search topic directly
+            if word in ['more', 'yes', 'ok', 'continue', 'next', 'details', 'elaborate']:
+                return topic
+
+            # Date/range words - search for end/duration
+            if word in ['to', 'until', 'till', 'end', 'ended', 'finish', 'finished']:
+                return f"{topic} end ended finished"
+
+            # Question words - combine with topic
+            if word in ['when', 'where', 'who', 'why', 'how', 'what']:
+                return f"{word} {topic}"
+
+            # Default: topic + word
+            return f"{topic} {word}"
 
         elif word_count == 2:
             # Two words: "and then?", "how many?", "tell more"
