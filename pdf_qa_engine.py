@@ -201,23 +201,49 @@ class QueryUnderstanding:
         QueryIntent.EXPLANATION: ['explain', 'elaborate', 'clarify', 'describe'],
     }
 
+    # Words that indicate follow-up (not a new topic)
+    FOLLOW_UP_WORDS = {
+        'more', 'yes', 'no', 'ok', 'continue', 'next', 'details', 'elaborate',
+        'to', 'until', 'till', 'end', 'when', 'where', 'who', 'why', 'how',
+        'and', 'also', 'again', 'really', 'exactly', 'specifically'
+    }
+
     @classmethod
     def detect_intent(cls, query: str, context: ConversationContext = None) -> QueryIntent:
-        """Smart intent detection with automatic follow-up handling"""
+        """Smart intent detection - distinguishes follow-ups from new topics"""
         query_lower = query.lower().strip()
-        word_count = len(query.split())
+        words = query.split()
+        word_count = len(words)
 
         # Check for greetings first
         for pattern in cls.GREETING_PATTERNS:
             if re.match(pattern, query_lower, re.IGNORECASE):
                 return QueryIntent.GREETING
 
-        # AUTOMATIC FOLLOW-UP: Any query after first turn with <= 5 words
-        if context and context.turn_count > 0 and word_count <= 5:
-            return QueryIntent.FOLLOW_UP
-
-        # Check for pronouns in any query after conversation started
+        # FOLLOW-UP detection: Only for VERY short queries with no new topic
         if context and context.turn_count > 0:
+            # Single word - check if it's a follow-up word or a new topic
+            if word_count == 1:
+                word = query_lower.strip('?!.,')
+                if word in cls.FOLLOW_UP_WORDS:
+                    return QueryIntent.FOLLOW_UP
+                # Single word that's NOT a follow-up word = new topic
+                # e.g., "ww2", "python", "agent" = new question
+
+            # 2 words - only follow-up if BOTH are generic/follow-up words
+            elif word_count == 2:
+                w1 = words[0].lower().strip('?!.,')
+                w2 = words[1].lower().strip('?!.,')
+                if w1 in cls.FOLLOW_UP_WORDS or w2 in cls.FOLLOW_UP_WORDS:
+                    # Check if any word looks like a new topic (not a follow-up word)
+                    if w1 not in cls.FOLLOW_UP_WORDS and len(w1) > 2:
+                        pass  # w1 is a new topic
+                    elif w2 not in cls.FOLLOW_UP_WORDS and len(w2) > 2:
+                        pass  # w2 is a new topic
+                    else:
+                        return QueryIntent.FOLLOW_UP
+
+            # Check for pronouns referencing previous context
             pronouns = r'\b(it|this|that|they|them|he|she|him|her|its|their|his|hers)\b'
             if re.search(pronouns, query_lower):
                 return QueryIntent.FOLLOW_UP
@@ -386,6 +412,7 @@ class PDFQAEngine:
         self._vector_store_cache: Dict[str, Any] = {}
         self._pdf_metadata_cache: Dict[str, PDFMetadata] = {}
         self._conversation_contexts: Dict[str, ConversationContext] = {}
+        self._session_documents: Dict[str, str] = {}  # Track which PDF each session is using
         self._response_cache: Dict[str, Dict] = {}  # SPEED: Cache recent responses
         self._cache_max_size = 50
 
@@ -471,8 +498,19 @@ class PDFQAEngine:
             except Exception as e:
                 logger.warning(f"Reranker failed: {e}")
 
-    def _get_conversation_context(self, session_id: str = "default") -> ConversationContext:
-        """Get or create conversation context for a session"""
+    def _get_conversation_context(self, session_id: str = "default", pdf_file_path: str = None) -> ConversationContext:
+        """Get or create conversation context for a session. Resets if document changes."""
+        # Check if document changed - reset context if so
+        if pdf_file_path:
+            current_doc = self._session_documents.get(session_id)
+            if current_doc and current_doc != pdf_file_path:
+                # Document changed - clear old context
+                logger.info(f"Document changed for session {session_id}, resetting conversation context")
+                if session_id in self._conversation_contexts:
+                    del self._conversation_contexts[session_id]
+            # Update tracked document
+            self._session_documents[session_id] = pdf_file_path
+
         if session_id not in self._conversation_contexts:
             self._conversation_contexts[session_id] = ConversationContext()
         return self._conversation_contexts[session_id]
@@ -739,8 +777,8 @@ What would you like to know?"""
         # Create cache key for response caching
         cache_key = f"{session_id}:{pdf_file_path}:{question.lower().strip()}"
 
-        # Get conversation context
-        conv_context = self._get_conversation_context(session_id)
+        # Get conversation context (resets automatically if document changed)
+        conv_context = self._get_conversation_context(session_id, pdf_file_path)
 
         # Smart intent detection
         intent = QueryUnderstanding.detect_intent(question, conv_context)
