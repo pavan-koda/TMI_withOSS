@@ -735,6 +735,9 @@ What would you like to know?"""
         """Robust question answering with intelligent fallbacks"""
         start_time = time.time()
 
+        # Create cache key for response caching
+        cache_key = f"{session_id}:{pdf_file_path}:{question.lower().strip()}"
+
         # Get conversation context
         conv_context = self._get_conversation_context(session_id)
 

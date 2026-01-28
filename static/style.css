@@ -39,6 +39,8 @@ body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    direction: ltr;
+    text-align: left;
 }
 
 .container {
@@ -355,6 +357,8 @@ header {
     background: linear-gradient(135deg, var(--gray-50), white);
     border-radius: var(--border-radius);
     border: 1px solid var(--gray-200);
+    direction: ltr;
+    text-align: left;
 }
 
 .chat-message {
@@ -395,6 +399,9 @@ header {
     border-radius: var(--border-radius);
     line-height: 1.6;
     font-size: 1rem;
+    direction: ltr;
+    text-align: left;
+    unicode-bidi: plaintext;
 }
 
 .message-content.question {
@@ -433,6 +440,8 @@ header {
     resize: vertical;
     transition: all 0.3s ease;
     background: var(--gray-50);
+    direction: ltr;
+    text-align: left;
 }
 
 #question-input:focus {
