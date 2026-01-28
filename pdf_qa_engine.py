@@ -75,37 +75,80 @@ class QueryIntent(Enum):
 
 @dataclass
 class ConversationContext:
-    """Tracks conversation state for better understanding"""
-    topics: List[str] = field(default_factory=list)
+    """Smart conversation tracking with multi-topic memory"""
+    topics: List[str] = field(default_factory=list)  # All discussed topics
     last_query: str = ""
     last_response: str = ""
     last_intent: QueryIntent = QueryIntent.UNKNOWN
     mentioned_entities: List[str] = field(default_factory=list)
     current_focus: str = ""
     turn_count: int = 0
+    conversation_summary: str = ""  # Brief summary of conversation
+
+    # Stopwords for topic extraction
+    STOPWORDS = {'what', 'who', 'where', 'when', 'how', 'why', 'is', 'are', 'was', 'were',
+                 'the', 'a', 'an', 'about', 'tell', 'me', 'more', 'can', 'you', 'please',
+                 'give', 'show', 'find', 'get', 'do', 'does', 'did', 'will', 'would',
+                 'could', 'should', 'have', 'has', 'had', 'be', 'been', 'being', 'to',
+                 'from', 'of', 'in', 'on', 'at', 'for', 'with', 'and', 'or', 'but', 'if',
+                 'then', 'than', 'this', 'that', 'these', 'those', 'it', 'its', 'i', 'my'}
+
+    def extract_topics(self, text: str) -> List[str]:
+        """Extract meaningful topics from text"""
+        words = text.strip().split()
+        topics = []
+
+        for word in words:
+            clean = word.strip('.,!?()[]"\'').lower()
+            # Keep if: not stopword, length >= 2, contains letters
+            if (clean not in self.STOPWORDS and
+                len(clean) >= 2 and
+                any(c.isalpha() for c in clean)):
+                # Preserve original case for proper nouns
+                original = word.strip('.,!?()"\'')
+                if original not in topics:
+                    topics.append(original)
+
+        return topics[:5]  # Keep top 5 topics
 
     def update(self, query: str, response: str, intent: QueryIntent, entities: List[str] = None):
-        """SPEED: Simplified update - skip expensive operations"""
+        """Smart update with topic tracking"""
         self.last_query = query
-        self.last_response = response[:300]  # SPEED: Truncate stored response
+        self.last_response = response[:500]  # Keep more context
         self.last_intent = intent
         self.turn_count += 1
 
-        # Extract focus from query - find the main topic
-        words = query.strip().split()
-        stopwords = {'what', 'who', 'where', 'when', 'how', 'why', 'is', 'are', 'the', 'a', 'an', 'about', 'tell', 'me', 'more'}
+        # Extract topics from query
+        query_topics = self.extract_topics(query)
 
-        # Filter out stopwords and punctuation
-        content_words = [w.strip('.,!?') for w in words if w.lower().strip('.,!?') not in stopwords and len(w.strip('.,!?')) >= 2]
+        # Update current focus (most recent meaningful topic)
+        if query_topics:
+            self.current_focus = query_topics[0]
+            # Add to topic history (avoid duplicates)
+            for topic in query_topics:
+                topic_lower = topic.lower()
+                if not any(t.lower() == topic_lower for t in self.topics):
+                    self.topics.append(topic)
 
-        if content_words:
-            # Use the first meaningful word as focus (preserve case for proper nouns)
-            self.current_focus = content_words[0]
-        elif words:
-            # Fallback: use the query itself if short enough
-            clean_query = query.strip().strip('.,!?')
-            if len(clean_query) <= 20:
-                self.current_focus = clean_query
+        # Keep only last 10 topics
+        self.topics = self.topics[-10:]
+
+        # Extract entities from response for better context
+        response_topics = self.extract_topics(response[:200])
+        for topic in response_topics[:3]:
+            if topic not in self.mentioned_entities:
+                self.mentioned_entities.append(topic)
+        self.mentioned_entities = self.mentioned_entities[-15:]
+
+    def get_context_hint(self) -> str:
+        """Get a context hint for the LLM"""
+        hints = []
+        if self.current_focus:
+            hints.append(f"Current topic: {self.current_focus}")
+        if len(self.topics) > 1:
+            recent = self.topics[-3:]
+            hints.append(f"Recent topics: {', '.join(recent)}")
+        return ". ".join(hints) if hints else ""
 
 
 @dataclass
@@ -121,139 +164,109 @@ class PDFMetadata:
 
 
 class QueryUnderstanding:
-    """Intelligent query analysis and understanding"""
+    """Intelligent query analysis - handles any conversational pattern automatically"""
 
     GREETING_PATTERNS = [
         r'^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening)|howdy|yo)[\s!.,]*$',
         r'^(what\'?s?\s*up|how\s*are\s*you)[\s!.,?]*$',
     ]
 
-    SUMMARY_KEYWORDS = ['summary', 'summarize', 'summarise', 'overview', 'about', 'tldr',
-                        'brief', 'main points', 'key points', 'gist', 'outline', 'describe']
-
-    COMPARISON_KEYWORDS = ['compare', 'comparison', 'difference', 'differ', 'versus', 'vs',
-                           'contrast', 'similar', 'similarity', 'better', 'worse']
-
-    LIST_KEYWORDS = ['list', 'enumerate', 'all the', 'what are the', 'name all',
-                     'give me all', 'show all', 'types of', 'kinds of', 'examples of']
-
-    DEFINITION_KEYWORDS = ['what is', 'what are', 'define', 'definition', 'meaning of',
-                           'what does', "what's", 'explain what']
-
-    HOW_TO_KEYWORDS = ['how to', 'how do', 'how can', 'how should', 'steps to',
-                       'process of', 'procedure', 'method for', 'way to']
-
-    WHY_KEYWORDS = ['why', 'reason', 'cause', 'because', 'purpose of', 'motivation']
-
-    # Patterns for longer follow-up queries (short queries auto-detected by word count)
-    FOLLOW_UP_PATTERNS = [
-        r'^(and|also|what about|how about|tell me more|elaborate|explain more)',
-        r'^(can you|could you|please)\s*(explain|elaborate|tell)',
-        r'\b(this|that|it|they|him|her|he|she)\b',  # Pronouns
-    ]
+    # Keywords for intent detection
+    INTENT_KEYWORDS = {
+        QueryIntent.SUMMARY: ['summary', 'summarize', 'overview', 'about', 'tldr', 'brief', 'main points'],
+        QueryIntent.COMPARISON: ['compare', 'comparison', 'difference', 'versus', 'vs', 'contrast', 'similar'],
+        QueryIntent.LIST_REQUEST: ['list', 'enumerate', 'all the', 'name all', 'types of', 'examples of'],
+        QueryIntent.DEFINITION: ['what is', 'what are', 'define', 'definition', 'meaning of', "what's"],
+        QueryIntent.HOW_TO: ['how to', 'how do', 'how can', 'steps to', 'process of', 'procedure'],
+        QueryIntent.WHY: ['why', 'reason', 'cause', 'because', 'purpose of'],
+        QueryIntent.EXPLANATION: ['explain', 'elaborate', 'clarify', 'describe'],
+    }
 
     @classmethod
     def detect_intent(cls, query: str, context: ConversationContext = None) -> QueryIntent:
-        """Detect the intent behind a user query"""
+        """Smart intent detection with automatic follow-up handling"""
         query_lower = query.lower().strip()
+        word_count = len(query.split())
 
-        # Check for greetings
+        # Check for greetings first
         for pattern in cls.GREETING_PATTERNS:
             if re.match(pattern, query_lower, re.IGNORECASE):
                 return QueryIntent.GREETING
 
-        # SMART FOLLOW-UP DETECTION: Any short query after conversation is likely a follow-up
+        # AUTOMATIC FOLLOW-UP: Any query after first turn with <= 5 words
+        if context and context.turn_count > 0 and word_count <= 5:
+            return QueryIntent.FOLLOW_UP
+
+        # Check for pronouns in any query after conversation started
         if context and context.turn_count > 0:
-            # Short queries (< 5 words) are almost always follow-ups
-            word_count = len(query.split())
-            if word_count <= 4:
+            pronouns = r'\b(it|this|that|they|them|he|she|him|her|its|their|his|hers)\b'
+            if re.search(pronouns, query_lower):
                 return QueryIntent.FOLLOW_UP
 
-            # Pattern-based follow-up detection for longer queries
-            for pattern in cls.FOLLOW_UP_PATTERNS:
-                if re.search(pattern, query_lower):
-                    return QueryIntent.FOLLOW_UP
-
-        # Check for yes/no questions
-        if query_lower.startswith(('is ', 'are ', 'was ', 'were ', 'do ', 'does ', 'did ',
-                                    'can ', 'could ', 'will ', 'would ', 'should ', 'has ', 'have ')):
+        # Yes/No questions
+        yes_no_starters = ('is ', 'are ', 'was ', 'were ', 'do ', 'does ', 'did ',
+                          'can ', 'could ', 'will ', 'would ', 'should ', 'has ', 'have ')
+        if query_lower.startswith(yes_no_starters):
             return QueryIntent.YES_NO
 
-        # Check for definition requests
-        for keyword in cls.DEFINITION_KEYWORDS:
-            if keyword in query_lower:
-                return QueryIntent.DEFINITION
-
-        # Check for how-to questions
-        for keyword in cls.HOW_TO_KEYWORDS:
-            if keyword in query_lower:
-                return QueryIntent.HOW_TO
-
-        # Check for why questions
-        for keyword in cls.WHY_KEYWORDS:
-            if query_lower.startswith(keyword) or f" {keyword} " in query_lower:
-                return QueryIntent.WHY
-
-        # Check for summaries
-        for keyword in cls.SUMMARY_KEYWORDS:
-            if keyword in query_lower:
-                return QueryIntent.SUMMARY
-
-        # Check for comparisons
-        for keyword in cls.COMPARISON_KEYWORDS:
-            if keyword in query_lower:
-                return QueryIntent.COMPARISON
-
-        # Check for lists
-        for keyword in cls.LIST_KEYWORDS:
-            if keyword in query_lower:
-                return QueryIntent.LIST_REQUEST
-
-        # Check for explanations
-        if any(word in query_lower for word in ['explain', 'elaborate', 'clarify', 'describe']):
-            return QueryIntent.EXPLANATION
+        # Keyword-based intent detection
+        for intent, keywords in cls.INTENT_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in query_lower:
+                    return intent
 
         return QueryIntent.SPECIFIC_QUESTION
 
     @classmethod
     def reformulate_query(cls, query: str, context: ConversationContext = None, intent: QueryIntent = None) -> str:
-        """Reformulate query for better retrieval - AUTOMATIC context handling"""
-        reformulated = query.strip()
-        query_lower = reformulated.lower()
+        """Smart query reformulation - handles all conversational patterns"""
+        original = query.strip()
+        query_lower = original.lower()
+        word_count = len(original.split())
 
-        # AUTOMATIC: For any follow-up, always combine with previous topic
-        if intent == QueryIntent.FOLLOW_UP and context and context.current_focus:
-            word_count = len(query.split())
+        # No context or not a follow-up - return as is
+        if not context or intent != QueryIntent.FOLLOW_UP:
+            return original
 
-            # Very short (1-2 words): use topic directly or combine
-            if word_count <= 2:
-                # Single word like "more", "to?", "when?" etc
-                reformulated = f"{context.current_focus} {query.strip('?')}"
-                return reformulated
+        # Get the best available topic
+        topic = context.current_focus
+        if not topic and context.topics:
+            topic = context.topics[-1]
+        if not topic:
+            return original
 
-            # Short (3-4 words): append topic if not already present
-            if word_count <= 4:
-                if context.current_focus.lower() not in query_lower:
-                    reformulated = f"{query} {context.current_focus}"
-                return reformulated
+        topic_lower = topic.lower()
 
-            # Replace pronouns in longer queries
-            pronouns = ['it', 'this', 'that', 'they', 'these', 'those', 'him', 'her', 'he', 'she']
+        # Already contains the topic - return as is
+        if topic_lower in query_lower:
+            return original
+
+        # SMART REFORMULATION based on query length and type
+        if word_count == 1:
+            # Single word: "more", "yes", "to?", "when?" etc
+            word = original.strip('?!.,')
+            if word.lower() in ['more', 'yes', 'ok', 'continue', 'next', 'details']:
+                return topic  # Just search for the topic
+            else:
+                return f"{topic} {word}"  # "world war to"
+
+        elif word_count == 2:
+            # Two words: "and then?", "how many?", "tell more"
+            return f"{topic} {original.strip('?!.,')}"
+
+        elif word_count <= 5:
+            # Short phrase: append topic
+            return f"{original} {topic}"
+
+        else:
+            # Longer query: replace pronouns
+            pronouns = ['it', 'this', 'that', 'they', 'them', 'he', 'she', 'him', 'her', 'its', 'their']
+            result = original
             for pronoun in pronouns:
-                if re.search(rf'\b{pronoun}\b', query_lower):
-                    reformulated = re.sub(rf'\b{pronoun}\b', context.current_focus, reformulated, flags=re.IGNORECASE)
+                if re.search(rf'\b{pronoun}\b', query_lower, re.IGNORECASE):
+                    result = re.sub(rf'\b{pronoun}\b', topic, result, count=1, flags=re.IGNORECASE)
                     break
-
-        # For definition queries, ensure the term is clear
-        if intent == QueryIntent.DEFINITION:
-            # Extract the term being defined
-            match = re.search(r'(?:what is|define|meaning of|what\'s|what are)\s+(?:a|an|the)?\s*(.+?)[\?.]?$',
-                            reformulated, re.IGNORECASE)
-            if match:
-                term = match.group(1).strip()
-                reformulated = f"definition and explanation of {term}"
-
-        return reformulated
+            return result
 
     @classmethod
     def extract_entities(cls, text: str) -> List[str]:
@@ -279,21 +292,7 @@ class QueryUnderstanding:
 
 
 class PromptBuilder:
-    """Builds concise prompts optimized for speed"""
-
-    # Dynamic prompts - paragraph format by default, list only when asked
-    FAST_PROMPTS = {
-        QueryIntent.SUMMARY: "Summarize in a short paragraph.",
-        QueryIntent.SPECIFIC_QUESTION: "Answer directly in 1-3 sentences.",
-        QueryIntent.COMPARISON: "Compare briefly in a paragraph.",
-        QueryIntent.LIST_REQUEST: "List the items.",  # Only this uses list format
-        QueryIntent.DEFINITION: "Define in 1-2 sentences.",
-        QueryIntent.HOW_TO: "Explain briefly.",
-        QueryIntent.WHY: "Explain the reason briefly.",
-        QueryIntent.EXPLANATION: "Explain in a short paragraph.",
-        QueryIntent.YES_NO: "Answer yes/no with brief reason.",
-        QueryIntent.FOLLOW_UP: "Add more relevant details.",
-    }
+    """Intelligent prompt builder for natural, accurate responses"""
 
     @staticmethod
     def build_prompt(
@@ -303,34 +302,48 @@ class PromptBuilder:
         intent: QueryIntent,
         conversation_context: ConversationContext = None
     ) -> str:
-        """Build concise prompt for faster LLM response"""
+        """Build intelligent prompt based on intent and context"""
 
-        task = PromptBuilder.FAST_PROMPTS.get(intent, "Answer concisely.")
-
-        # Build topic context for follow-ups
-        topic_hint = ""
-        prev_context = ""
-        if intent == QueryIntent.FOLLOW_UP and conversation_context:
+        # Conversation context for follow-ups
+        conv_info = ""
+        if conversation_context and conversation_context.turn_count > 0:
             if conversation_context.current_focus:
-                topic_hint = f" about {conversation_context.current_focus}"
-            if conversation_context.last_response:
-                prev_context = f"\nPrevious answer: {conversation_context.last_response[:200]}\n"
+                conv_info = f"Topic: {conversation_context.current_focus}. "
+            if conversation_context.last_response and intent == QueryIntent.FOLLOW_UP:
+                conv_info += f"Previous: {conversation_context.last_response[:150]}..."
 
-        # SPEED: Short prompt with strict relevance
-        prompt = f"""Answer{topic_hint} using ONLY the context below.
-{prev_context}
-RULES:
-- Include ONLY information directly related to the question
-- For follow-up questions like "to?", "when?", understand from previous context
-- Keep response natural and conversational
-- {task}
-- If nothing relevant found, say "Not in document."
+        # Intent-specific instructions
+        intent_instructions = {
+            QueryIntent.SUMMARY: "Give a brief summary in 2-3 sentences.",
+            QueryIntent.SPECIFIC_QUESTION: "Answer directly and concisely.",
+            QueryIntent.COMPARISON: "Compare the key differences briefly.",
+            QueryIntent.LIST_REQUEST: "List the items clearly.",
+            QueryIntent.DEFINITION: "Define clearly in 1-2 sentences.",
+            QueryIntent.HOW_TO: "Explain the steps concisely.",
+            QueryIntent.WHY: "Explain the reason briefly.",
+            QueryIntent.EXPLANATION: "Explain clearly in a short paragraph.",
+            QueryIntent.YES_NO: "Answer yes or no, then explain briefly.",
+            QueryIntent.FOLLOW_UP: "Continue naturally from the previous answer.",
+        }
 
-Context:
+        instruction = intent_instructions.get(intent, "Answer concisely.")
+
+        # Build the prompt
+        prompt = f"""You are answering questions about a document. {conv_info}
+
+INSTRUCTIONS:
+- Use ONLY the information from the context below
+- {instruction}
+- Be natural and conversational
+- If the information is not in the context, say "This is not covered in the document."
+- Do NOT make up facts or use external knowledge
+
+CONTEXT:
 {context_text}
 
-Q: {question}
-A:"""
+QUESTION: {question}
+
+ANSWER:"""
 
         return prompt
 
@@ -705,22 +718,15 @@ What would you like to know?"""
         chat_history: Optional[List] = None,
         session_id: str = "default",
     ) -> Dict[str, Any]:
-        """Answer question - optimized for speed"""
+        """Robust question answering with intelligent fallbacks"""
         start_time = time.time()
-
-        # SPEED: Check cache for exact same question (skip for streaming)
-        cache_key = f"{pdf_file_path}:{question.lower().strip()}"
-        if not callbacks and cache_key in self._response_cache:
-            cached = self._response_cache[cache_key].copy()
-            cached["response_time"] = time.time() - start_time
-            cached["cached"] = True
-            return cached
 
         # Get conversation context
         conv_context = self._get_conversation_context(session_id)
 
-        # SPEED: Fast intent detection
+        # Smart intent detection
         intent = QueryUnderstanding.detect_intent(question, conv_context)
+        logger.info(f"Query: '{question}' | Intent: {intent.value} | Turn: {conv_context.turn_count}")
 
         # Handle greetings
         if intent == QueryIntent.GREETING:
@@ -743,25 +749,46 @@ What would you like to know?"""
                 "intent": intent.value
             }
 
-        # Reformulate query for better retrieval
+        # SMART QUERY REFORMULATION
         search_query = QueryUnderstanding.reformulate_query(question, conv_context, intent)
-        logger.info(f"Original: {question} | Reformulated: {search_query} | Focus: {conv_context.current_focus}")
+        logger.info(f"Original: '{question}' | Reformulated: '{search_query}' | Focus: {conv_context.current_focus}")
 
-        # Retrieve documents
+        # MULTI-STRATEGY RETRIEVAL
         retrieved_docs = self._retrieve_documents(search_query, vector_store, intent)
 
-        # For follow-ups: try multiple strategies if no results
-        if intent == QueryIntent.FOLLOW_UP and (not retrieved_docs or len(retrieved_docs) < 2):
-            # Try using just the topic
+        # Fallback strategies for better results
+        if not retrieved_docs or len(retrieved_docs) < 2:
+            fallback_queries = []
+
+            # Strategy 1: Use current focus/topic
             if conv_context.current_focus:
-                logger.info(f"Retrying with topic: {conv_context.current_focus}")
-                topic_docs = self._retrieve_documents(conv_context.current_focus, vector_store, QueryIntent.SPECIFIC_QUESTION)
-                if topic_docs:
-                    retrieved_docs = topic_docs
-            # Try previous query
-            if not retrieved_docs and conv_context.last_query:
-                logger.info(f"Retrying with previous query: {conv_context.last_query}")
-                retrieved_docs = self._retrieve_documents(conv_context.last_query, vector_store, QueryIntent.SPECIFIC_QUESTION)
+                fallback_queries.append(conv_context.current_focus)
+
+            # Strategy 2: Use recent topics
+            if conv_context.topics:
+                for topic in reversed(conv_context.topics[-3:]):
+                    if topic.lower() != conv_context.current_focus.lower() if conv_context.current_focus else True:
+                        fallback_queries.append(topic)
+
+            # Strategy 3: Use previous query
+            if conv_context.last_query and len(conv_context.last_query) > 5:
+                fallback_queries.append(conv_context.last_query)
+
+            # Try fallback queries
+            for fallback in fallback_queries:
+                if retrieved_docs and len(retrieved_docs) >= 2:
+                    break
+                logger.info(f"Fallback search: '{fallback}'")
+                fallback_docs = self._retrieve_documents(fallback, vector_store, QueryIntent.SPECIFIC_QUESTION)
+                if fallback_docs:
+                    if not retrieved_docs:
+                        retrieved_docs = fallback_docs
+                    else:
+                        # Merge results, avoiding duplicates
+                        existing_content = {d.page_content[:100] for d in retrieved_docs}
+                        for doc in fallback_docs:
+                            if doc.page_content[:100] not in existing_content:
+                                retrieved_docs.append(doc)
 
         if not retrieved_docs:
             response = self._handle_no_results(question, intent)
