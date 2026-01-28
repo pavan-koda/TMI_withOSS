@@ -19,6 +19,9 @@ const loadingText = document.getElementById('loading-text');
 let isGenerating = false;
 let abortController = null;
 let selectedFile = null;
+let typewriterQueue = [];
+let isTyping = false;
+const TYPING_SPEED = 15; // milliseconds per character (lower = faster)
 
 // Event Listeners
 uploadArea.addEventListener('click', () => pdfInput.click());
@@ -200,6 +203,10 @@ async function askQuestion() {
         messageDiv.appendChild(content);
         chatHistory.appendChild(messageDiv);
 
+        // Reset typewriter queue
+        typewriterQueue = [];
+        isTyping = false;
+
         // Read the stream
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -208,24 +215,23 @@ async function askQuestion() {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             const chunk = decoder.decode(value, { stream: true });
             buffer += chunk;
-            
+
             const lines = buffer.split('\n\n');
             buffer = lines.pop(); // Keep incomplete chunk
-            
+
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
                     const dataStr = line.slice(6);
                     if (dataStr === '[DONE]') continue;
-                    
+
                     try {
                         const data = JSON.parse(dataStr);
                         if (data.token) {
-                            content.textContent += data.token;
-                            // Auto-scroll
-                            chatHistory.scrollTop = chatHistory.scrollHeight;
+                            // Use smooth typewriter effect
+                            addToTypewriter(content, data.token);
                         }
                     } catch (e) {
                         console.error('Error parsing SSE:', e);
@@ -233,7 +239,9 @@ async function askQuestion() {
                 }
             }
         }
-        
+
+        // Flush any remaining text in queue
+        flushTypewriterQueue(content);
         hideStatus();
 
     } catch (error) {
@@ -357,6 +365,52 @@ function showLoading(title = 'Processing', text = 'Please wait...') {
 
 function hideLoading() {
     loadingOverlay.style.display = 'none';
+}
+
+// Smooth typewriter effect for streaming
+function typewriterEffect(element, text) {
+    return new Promise((resolve) => {
+        let i = 0;
+        function typeChar() {
+            if (i < text.length && isGenerating) {
+                element.textContent += text.charAt(i);
+                i++;
+                // Auto-scroll
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+                setTimeout(typeChar, TYPING_SPEED);
+            } else {
+                resolve();
+            }
+        }
+        typeChar();
+    });
+}
+
+// Queue-based typewriter for smooth streaming
+async function processTypewriterQueue(element) {
+    if (isTyping) return;
+    isTyping = true;
+
+    while (typewriterQueue.length > 0 && isGenerating) {
+        const text = typewriterQueue.shift();
+        await typewriterEffect(element, text);
+    }
+
+    isTyping = false;
+}
+
+// Add text to typewriter queue
+function addToTypewriter(element, text) {
+    typewriterQueue.push(text);
+    processTypewriterQueue(element);
+}
+
+// Flush remaining queue immediately (when streaming ends)
+function flushTypewriterQueue(element) {
+    while (typewriterQueue.length > 0) {
+        element.textContent += typewriterQueue.shift();
+    }
+    chatHistory.scrollTop = chatHistory.scrollHeight;
 }
 
 // Check server health on load

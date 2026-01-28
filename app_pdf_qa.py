@@ -224,14 +224,13 @@ def load_custom_css():
 
 
 class StreamHandler(BaseCallbackHandler):
-    """Callback handler for streaming LLM responses"""
+    """Callback handler for streaming LLM responses - smooth letter by letter"""
 
     def __init__(self, container, initial_text="", message_context=None):
         self.container = container
         self.text = initial_text
         self.token_count = 0
         self.message_context = message_context
-        self.update_interval = 2
         self._stopped = False
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
@@ -239,8 +238,8 @@ class StreamHandler(BaseCallbackHandler):
             return
         self.text += token
         self.token_count += 1
-        if self.token_count % self.update_interval == 0 or len(token.strip()) == 0:
-            self.container.markdown(self.text + " ▌")
+        # Update on every token for smooth streaming
+        self.container.markdown(self.text + " ▌")
         if self.message_context is not None:
             self.message_context["content"] = self.text
 
