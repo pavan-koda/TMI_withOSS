@@ -3,7 +3,7 @@ Enhanced PDF QA Engine - Conversational & Intelligent
 Features: Intent detection, query understanding, conversation memory, robust error handling
 """
 
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -570,7 +570,7 @@ class PDFQAEngine:
         if progress_callback:
             progress_callback(0.1, f"Loading {pdf_filename}...")
 
-        loader = PyPDFLoader(pdf_file_path)
+        loader = PyMuPDFLoader(pdf_file_path)
         documents = loader.load()
 
         if progress_callback:
