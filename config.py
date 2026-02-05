@@ -17,18 +17,18 @@ EMBEDDING_CONFIG = {
     'model_name': 'all-MiniLM-L6-v2',  # Fast, small model
 }
 
-# Reranker Configuration - DISABLED for speed
+# Reranker Configuration - ENABLED for quality
 RERANKER_CONFIG = {
-    'enabled': False,  # SPEED: Skip reranking
+    'enabled': True,  # QUALITY: Enable reranking for better relevance
     'model_name': 'cross-encoder/ms-marco-MiniLM-L-6-v2',
-    'top_k': 3,
+    'top_k': 5,
 }
 
-# Retrieval Configuration - Optimized for speed
+# Retrieval Configuration - Optimized for quality
 RETRIEVAL_CONFIG = {
-    'initial_k': 3,  # SPEED: Only 3 chunks for specific questions
-    'summary_k': 6,  # SPEED: Only 6 chunks for summaries
-    'summary_use_mmr': False,  # SPEED: Skip MMR
+    'initial_k': 8,  # QUALITY: Retrieve more chunks for better context
+    'summary_k': 10,  # QUALITY: Retrieve more chunks for summaries
+    'summary_use_mmr': False,
     'use_mmr': False,
     'mmr_lambda': 0.5,
     'score_threshold': 0.0,

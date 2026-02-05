@@ -47,8 +47,8 @@ except ImportError:
     RETRIEVAL_CONFIG = {'initial_k': 3, 'summary_k': 8, 'use_mmr': False, 'mmr_lambda': 0.5}
 
 # Speed optimization constants - reduced for faster responses
-MAX_CONTEXT_LENGTH = 2000  # Reduced for faster LLM processing
-MAX_CHUNK_LENGTH = 400  # Shorter chunks
+MAX_CONTEXT_LENGTH = 4000  # Reduced for faster LLM processing
+MAX_CHUNK_LENGTH = 600  # Shorter chunks
 
 logger = logging.getLogger(__name__)
 
