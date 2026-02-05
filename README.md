@@ -15,6 +15,15 @@ A local PDF chat application using **Mistral 7B**, **Ollama**, **LangChain**, an
 2. **Ollama**: [Download here](https://ollama.com)
 3. **Mistral Model**: Run `ollama pull mistral`
 
+## Hardware Requirements
+
+| Component | Requirement                  |
+|-----------|------------------------------|
+| GPU       | 24 GB VRAM (e.g., RTX 4090)  |
+| CPU       | 12+ Threads                  |
+| RAM       | 64 GB                        |
+| Storage   | 1 TB NVMe SSD                |
+
 ## Quick Start
 
 1. **Run Setup**:

@@ -369,22 +369,35 @@ Q: {conversation_context.last_query}
 A: {conversation_context.last_response[:300]}
 """
 
-        # Strict prompt - ONLY from document, no external knowledge
-        prompt = f"""You are a document Q&A assistant. Answer ONLY from the provided context.
-{prev_qa}
-DOCUMENT CONTEXT:
-{context_text}
+        # Dynamic instruction based on intent
+        if intent == QueryIntent.SUMMARY:
+            answer_guideline = "Provide a comprehensive summary of the main points. Use bullet points for key topics."
+        elif intent == QueryIntent.LIST_REQUEST:
+            answer_guideline = "List all the requested items clearly. Use a numbered or bulleted list."
+        elif intent in [QueryIntent.YES_NO, QueryIntent.GREETING]:
+            answer_guideline = "Answer concisely in one or two sentences."
+        else:
+            answer_guideline = "Answer the question thoroughly but concisely. The length of the answer should be appropriate to the question's complexity."
 
+        # Stricter and more detailed prompt
+        prompt = f"""You are an expert Q&A assistant for documents. Your task is to answer questions based ONLY on the provided document context.
+
+DOCUMENT CONTEXT:
+---
+{context_text}
+---
+{prev_qa}
 QUESTION: {question}
 
-STRICT RULES:
-1. Answer ONLY using information from DOCUMENT CONTEXT above
-2. If the answer is NOT in the document, say ONLY: "Not covered in the document."
-3. NEVER add external knowledge or facts not in the context
-4. If this is a follow-up (like "to?", "more"), use PREVIOUS Q&A for understanding
-5. Be concise
+**INSTRUCTIONS:**
+1.  **Strictly Adhere to Context:** Your answer MUST be based exclusively on the "DOCUMENT CONTEXT" provided. Do not use any external knowledge.
+2.  **Handle Missing Information:** If the answer cannot be found in the context, you MUST respond with ONLY the phrase: "This is not covered in the document."
+3.  **Answer Formatting:** {answer_guideline}
+4.  **Follow-up Questions:** If the question is a follow-up (e.g., "tell me more," "what about them?"), use the "PREVIOUS Q&A" to understand the topic.
+5.  **Be Objective:** Do not add personal opinions or interpretations.
 
-ANSWER:"""
+**ANSWER:**
+"""
 
         return prompt
 
